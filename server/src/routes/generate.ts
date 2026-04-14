@@ -6,7 +6,7 @@ import { pool } from '../db/pool.js';
 import { generateUUID } from '../db/sqlite.js';
 import { config } from '../config/index.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
-import { getGradioClient } from '../services/gradio-client.js';
+import { isACEStepAvailable } from "../services/acestep.js";
 import {
   generateMusicViaAPI,
   getJobStatus,
@@ -601,7 +601,7 @@ router.get('/models', async (_req, res: Response) => {
     const ACESTEP_DIR = process.env.ACESTEP_PATH || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../ACE-Step-1.5');
     const checkpointsDir = path.join(ACESTEP_DIR, 'checkpoints');
 
-    // All known DiT models from Gradio's model_downloader.py registry:
+    // All known DiT models from ACE-Step's model_downloader.py registry:
     // - MAIN_MODEL_COMPONENTS includes "acestep-v15-turbo" (bundled with main download)
     // - SUBMODEL_REGISTRY includes the rest (separate HuggingFace repos, auto-downloaded on init)
     const ALL_DIT_MODELS = [
@@ -613,23 +613,23 @@ router.get('/models', async (_req, res: Response) => {
       'acestep-v15-turbo-continuous',   // submodel
     ];
 
-    // Query Gradio /v1/models to get the currently loaded/active model
+    // Query ACE-Step /v1/models to get the currently loaded/active model
     let activeModel: string | null = null;
     try {
       const apiRes = await fetch(`${config.acestep.apiUrl}/v1/models`);
       if (apiRes.ok) {
         const data = await apiRes.json() as any;
-        const gradioModels = data?.data?.models || data?.models || [];
-        if (gradioModels.length > 0) {
-          activeModel = gradioModels[0]?.name || null;
+        const ace-stepModels = data?.data?.models || data?.models || [];
+        if (ace-stepModels.length > 0) {
+          activeModel = ace-stepModels[0]?.name || null;
         }
       }
     } catch {
-      // Gradio API unavailable
+      // ACE-Step API unavailable
     }
 
     // Check which models are downloaded (exist on disk)
-    // Matches Gradio's handler.py check_model_exists() and get_available_acestep_v15_models()
+    // Matches ACE-Step's handler.py check_model_exists() and get_available_acestep_v15_models()
     const { existsSync, statSync } = await import('fs');
     const downloaded = new Set<string>();
     for (const model of ALL_DIT_MODELS) {
@@ -675,17 +675,21 @@ router.get('/models', async (_req, res: Response) => {
   }
 });
 
-// GET /api/generate/random-description — Load a random simple description from Gradio
+// GET /api/generate/random-description — Load a random simple description from ACE-Step
 router.get('/random-description', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const client = await getGradioClient();
-    const result = await client.predict('/load_random_simple_description', []);
-    const data = result.data as unknown[];
-    // Returns [description, instrumental, vocal_language]
+    const apiUrl = config.acestep.apiUrl || 'http://localhost:8000';
+    const apiRes = await fetch(`${apiUrl}/create_random_sample`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await apiRes.json() as any;
+    const sample = data?.data || data || {};
     res.json({
-      description: data[0] || '',
-      instrumental: data[1] || false,
-      vocalLanguage: data[2] || 'unknown',
+      description: sample.caption || sample.prompt || '',
+      instrumental: sample.instrumental || false,
+      vocalLanguage: sample.vocal_language || 'unknown',
     });
   } catch (error) {
     console.error('Random description error:', error);
@@ -695,7 +699,9 @@ router.get('/random-description', authMiddleware, async (_req: AuthenticatedRequ
 
 router.get('/health', async (_req, res: Response) => {
   try {
-    const healthy = await checkSpaceHealth();
+    const apiUrl = config.acestep.apiUrl || "http://localhost:8000";
+    const healthRes = await fetch(`${apiUrl}/health`, { signal: AbortSignal.timeout(5000) });
+    const healthy = healthRes.ok;
     res.json({ healthy, aceStepUrl: config.acestep.apiUrl });
   } catch (error) {
     res.json({ healthy: false, aceStepUrl: config.acestep.apiUrl, error: (error as Error).message });
