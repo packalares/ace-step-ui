@@ -23,29 +23,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Fix torchcodec: uninstall it and patch torchaudio to use soundfile directly
-# torchaudio 2.10 tries torchcodec first which fails with FFmpeg 4.
-# We monkey-patch torchaudio.save to bypass torchcodec entirely.
-RUN pip uninstall -y torchcodec 2>/dev/null || true
-COPY <<'PATCH' /app/patch_torchaudio.py
-import torchaudio
-import soundfile as sf
-
-_orig_save = torchaudio.save
-def _patched_save(filepath, src, sample_rate, channels_first=True, **kwargs):
-    t = src.cpu().float()
-    if channels_first and t.dim() == 2:
-        t = t.T
-    elif t.dim() == 1:
-        t = t.unsqueeze(1)
-    audio_np = t.numpy()
-    fmt = str(filepath).rsplit('.', 1)[-1].upper()
-    if fmt in ('MP3', 'OGG', 'OPUS', 'AAC'):
-        fmt = 'WAV'
-    sf.write(str(filepath), audio_np, sample_rate, format=fmt)
-torchaudio.save = _patched_save
-PATCH
-ENV PYTHONSTARTUP=/app/patch_torchaudio.py
+# Install FFmpeg 7 shared libraries (torchcodec needs libavutil.so.59+)
+# Ubuntu 22.04 only has FFmpeg 4 in default repos
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common \
+    && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 # Python venv
 RUN python3.11 -m venv /app/.venv
