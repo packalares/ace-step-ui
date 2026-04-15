@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
-  Database, Play, Square, Download, FolderOpen, Save, Loader2, Music2,
-  Edit3, Upload, X, Volume2, FileAudio, ChevronRight, Zap, Search,
-  Cpu, Wand2, Settings, RefreshCw, Check,
+  Play, Square, Download, FolderOpen, Save, Loader2,
+  Edit3, Upload, X, Volume2, FileAudio, Zap,
+  Wand2, Check,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
@@ -1061,15 +1061,17 @@ export const TrainingPanel: React.FC = () => {
 
 // Reusable Section component
 const Section: React.FC<{ title: string | React.ReactNode; children: React.ReactNode }> = ({ title, children }) => (
-  <div className="bg-white/[0.02] border border-white/5 rounded-xl p-3">
-    <h3 className="text-xs font-semibold text-zinc-300 mb-2">{title}</h3>
-    {children}
+  <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
+    <div className="px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
+      <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{title}</h3>
+    </div>
+    <div className="p-3">{children}</div>
   </div>
 );
 
 const FieldRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div className="flex items-center gap-2">
-    <label className="text-[11px] text-zinc-500 w-28 flex-shrink-0">{label}</label>
+    <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 w-28 flex-shrink-0">{label}</label>
     {children}
   </div>
 );
@@ -1084,8 +1086,8 @@ const ParamSlider: React.FC<{
 }> = ({ label, value, min, max, step, onChange }) => (
   <div>
     <div className="flex items-center justify-between mb-0.5">
-      <label className="text-[11px] text-zinc-500">{label}</label>
-      <span className="text-[11px] text-zinc-400 font-mono">{step < 1 ? value.toFixed(2) : value}</span>
+      <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">{label}</label>
+      <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">{step < 1 ? value.toFixed(2) : value}</span>
     </div>
     <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(parseFloat(e.target.value))} className="w-full accent-pink-500 h-1.5" />
   </div>

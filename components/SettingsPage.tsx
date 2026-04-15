@@ -2,27 +2,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, Download, Check } from 'lucide-react';
 import { EditableSlider } from './EditableSlider';
 import { useAuth } from '../context/AuthContext';
+import { DIT_MODELS, LM_MODELS, LYRICS_MODELS } from '../data/models';
 
 interface SettingsPageProps {
   onNavigate?: (view: string) => void;
 }
-
-// --- DiT Model descriptions & sizes ---
-const DIT_CATALOG: Record<string, { description: string; size: string }> = {
-  'acestep-v15-turbo': { description: 'Optimized for speed. Uses fewer inference steps (5-10). Best for quick iterations.', size: '4.5 GB' },
-  'acestep-v15-base': { description: 'Standard DiT model. Needs more steps (20-50) for best quality. Most versatile.', size: '4.5 GB' },
-  'acestep-v15-sft': { description: 'Supervised fine-tuned. Better prompt adherence and musical structure.', size: '4.5 GB' },
-  'acestep-v15-turbo-shift1': { description: 'Turbo variant with shift=1. Different tonal characteristics.', size: '4.5 GB' },
-  'acestep-v15-turbo-shift3': { description: 'Turbo variant with shift=3. Warmer, richer sound.', size: '4.5 GB' },
-  'acestep-v15-turbo-continuous': { description: 'Continuous flow turbo. Smoother transitions, experimental.', size: '4.5 GB' },
-};
-
-// --- LM Model catalog ---
-const LM_CATALOG: Record<string, { description: string; size: string }> = {
-  'acestep-5Hz-lm-0.6B': { description: 'Qwen3 Embedding. Lightweight text encoder, always loaded.', size: '1.2 GB' },
-  'acestep-5Hz-lm-1.7B': { description: 'Medium language model. Good balance of quality and speed.', size: '3.5 GB' },
-  'acestep-5Hz-lm-4B': { description: 'Large language model. Best prompt understanding and lyrics.', size: '7.9 GB' },
-};
 
 interface DitModelInfo {
   name: string;
@@ -56,23 +40,28 @@ function lsGetBool(key: string, fallback: boolean): boolean {
   return v === 'true';
 }
 
-// --- Compact Model Card (grid-friendly) ---
-const ModelCard: React.FC<{
+// --- Generic Model Card (used for DiT, LM, and Lyrics models) ---
+interface GenericModelCardProps {
   name: string;
   description: string;
   size: string;
   isActive: boolean;
-  isPreloaded: boolean;
-  isLoaded: boolean;
+  isAvailable: boolean;
   isSwitching: boolean;
   isDownloading: boolean;
   downloadError?: string;
   onClick: () => void;
   onDownload: () => void;
-}> = ({ name, description, size, isActive, isPreloaded, isSwitching, isDownloading, downloadError, onClick, onDownload }) => {
-  const shortName = name.replace('acestep-v15-', '').replace('acestep-5Hz-lm-', '');
-  const canSwitch = isPreloaded && !isActive && !isSwitching;
-  const needsDownload = !isPreloaded && !isDownloading;
+  activeLabel?: string;
+  availableLabel?: string;
+}
+
+const GenericModelCard: React.FC<GenericModelCardProps> = ({
+  name, description, size, isActive, isAvailable, isSwitching, isDownloading,
+  downloadError, onClick, onDownload, activeLabel = 'Active', availableLabel = 'Ready',
+}) => {
+  const canSwitch = isAvailable && !isActive && !isSwitching;
+  const needsDownload = !isAvailable && !isDownloading;
 
   return (
     <div
@@ -88,21 +77,21 @@ const ModelCard: React.FC<{
       tabIndex={canSwitch ? 0 : undefined}
     >
       <div className="flex items-center justify-between mb-0.5">
-        <span className="text-sm font-semibold text-zinc-900 dark:text-white">{shortName}</span>
+        <span className="text-sm font-semibold text-zinc-900 dark:text-white">{name}</span>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">{size}</span>
           {isActive && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-              Active
+              {activeLabel === 'Selected' ? <Check size={9} /> : <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />}
+              {activeLabel}
             </span>
           )}
-          {!isActive && isPreloaded && (
+          {!isActive && isAvailable && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
-              Ready
+              {availableLabel}
             </span>
           )}
-          {!isActive && !isPreloaded && !isDownloading && (
+          {!isActive && !isAvailable && !isDownloading && (
             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
               N/A
             </span>
@@ -140,155 +129,6 @@ const ModelCard: React.FC<{
   );
 };
 
-// --- Compact LM Model Card ---
-const LmModelCard: React.FC<{
-  name: string;
-  description: string;
-  size: string;
-  isActive: boolean;
-  isLoaded: boolean;
-  isDownloading: boolean;
-  downloadError?: string;
-  onClick: () => void;
-  onDownload: () => void;
-}> = ({ name, description, size, isActive, isLoaded, isDownloading, downloadError, onClick, onDownload }) => {
-  const shortName = name.replace('acestep-5Hz-lm-', '');
-  const needsDownload = !isLoaded && !isDownloading;
-  return (
-    <div
-      onClick={isLoaded ? onClick : undefined}
-      role={isLoaded ? 'button' : undefined}
-      tabIndex={isLoaded ? 0 : undefined}
-      className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
-        isActive
-          ? 'border-green-500/50 bg-green-500/5 dark:bg-green-500/10'
-          : isLoaded
-            ? 'border-zinc-200 dark:border-white/10 hover:border-pink-500/30 hover:bg-zinc-50 dark:hover:bg-white/5 cursor-pointer'
-            : 'border-zinc-200 dark:border-white/10'
-      }`}
-    >
-      <div className="flex items-center justify-between mb-0.5">
-        <span className="text-sm font-semibold text-zinc-900 dark:text-white">{shortName}</span>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">{size}</span>
-          {isActive && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 flex items-center gap-1">
-              <Check size={9} />
-              Selected
-            </span>
-          )}
-          {isLoaded && !isActive && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
-              Loaded
-            </span>
-          )}
-          {isDownloading && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center gap-1">
-              <Loader2 size={9} className="animate-spin" />
-              DL...
-            </span>
-          )}
-        </div>
-      </div>
-      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight line-clamp-2">{description}</p>
-      {needsDownload && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDownload(); }}
-          className="mt-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-pink-500 hover:bg-pink-600 text-white transition-colors flex items-center gap-1"
-        >
-          <Download size={10} />
-          Download
-        </button>
-      )}
-      {downloadError && (
-        <div className="flex items-center gap-1.5 mt-1 text-red-500">
-          <span className="text-[10px] font-medium">Failed: {downloadError}</span>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// --- Lyrics Model catalog ---
-const LYRICS_CATALOG: { id: string; name: string; description: string; size: string }[] = [
-  { id: 'llama-song-stream-3b-q4', name: 'Song Stream 3B (Q4)', description: 'Fast, good quality lyrics generation (~2 GB RAM)', size: '2.0 GB' },
-  { id: 'llama-song-stream-3b-q8', name: 'Song Stream 3B (Q8)', description: 'Higher quality, uses more RAM (~3.5 GB RAM)', size: '3.5 GB' },
-];
-
-// --- Compact Lyrics Model Card ---
-const LyricsModelCard: React.FC<{
-  id: string;
-  name: string;
-  description: string;
-  size: string;
-  isSelected: boolean;
-  isDownloaded: boolean;
-  isDownloading: boolean;
-  downloadError?: string;
-  onSelect: () => void;
-  onDownload: () => void;
-}> = ({ name, description, size, isSelected, isDownloaded, isDownloading, downloadError, onSelect, onDownload }) => {
-  const canSelect = isDownloaded && !isSelected;
-  const needsDownload = !isDownloaded && !isDownloading;
-  return (
-    <div
-      onClick={canSelect ? onSelect : undefined}
-      role={canSelect ? 'button' : undefined}
-      tabIndex={canSelect ? 0 : undefined}
-      className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
-        isSelected
-          ? 'border-green-500/50 bg-green-500/5 dark:bg-green-500/10'
-          : canSelect
-            ? 'border-zinc-200 dark:border-white/10 hover:border-pink-500/30 hover:bg-zinc-50 dark:hover:bg-white/5 cursor-pointer'
-            : 'border-zinc-200 dark:border-white/10'
-      }`}
-    >
-      <div className="flex items-center justify-between mb-0.5">
-        <span className="text-sm font-semibold text-zinc-900 dark:text-white">{name}</span>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">{size}</span>
-          {isSelected && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 flex items-center gap-1">
-              <Check size={9} />
-              Selected
-            </span>
-          )}
-          {isDownloaded && !isSelected && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
-              Downloaded
-            </span>
-          )}
-          {!isDownloaded && !isDownloading && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
-              N/A
-            </span>
-          )}
-          {isDownloading && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center gap-1">
-              <Loader2 size={9} className="animate-spin" />
-              DL...
-            </span>
-          )}
-        </div>
-      </div>
-      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight line-clamp-2">{description}</p>
-      {needsDownload && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onDownload(); }}
-          className="mt-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-pink-500 hover:bg-pink-600 text-white transition-colors flex items-center gap-1"
-        >
-          <Download size={10} />
-          Download
-        </button>
-      )}
-      {downloadError && (
-        <div className="flex items-center gap-1.5 mt-1 text-red-500">
-          <span className="text-[10px] font-medium">Failed: {downloadError}</span>
-        </div>
-      )}
-    </div>
-  );
-};
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
   const { token } = useAuth();
@@ -380,7 +220,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
       }
 
       // LM models: combine inventory + catalog
-      const allLmNames = Object.keys(LM_CATALOG);
+      const allLmNames = Object.keys(LM_MODELS);
       const lmResult: InventoryLmModel[] = allLmNames.map(name => {
         const fromInv = inventoryLmModels.find(m => m.name === name);
         return { name, is_loaded: fromInv?.is_loaded ?? false };
@@ -577,152 +417,155 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
   // Build DiT model list for display — use fetched models, fall back to catalog
   const ditModelList = ditModels.length > 0
     ? ditModels
-    : Object.keys(DIT_CATALOG).map(name => ({ name, is_active: false, is_preloaded: false }));
+    : Object.keys(DIT_MODELS).map(name => ({ name, is_active: false, is_preloaded: false }));
 
   return (
-    <div className="h-full w-full flex flex-col bg-zinc-50 dark:bg-suno-panel overflow-y-auto scrollbar-hide">
-      <div className="p-6 space-y-5 pb-24">
+    <div className="h-full w-full flex flex-col bg-zinc-50 dark:bg-suno-panel overflow-hidden">
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 scrollbar-hide pb-24">
         {/* Page Header */}
         <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">Settings</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Configure models, generation defaults, and LM parameters</p>
+          <h1 className="text-lg font-bold text-zinc-900 dark:text-white">Settings</h1>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Configure models, generation defaults, and LM parameters</p>
         </div>
 
         {/* ===== DiT MODELS ===== */}
-        <div className="space-y-2">
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">DiT Models</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Music generation models -- click to switch active</p>
+        <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
+          <div className="px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
+            <h2 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">DiT Models</h2>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">Music generation models -- click to switch active</p>
           </div>
           {switchWarning && (
-            <div className="px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/30 text-xs text-amber-700 dark:text-amber-400">
+            <div className="mx-3 mt-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/30 text-xs text-amber-700 dark:text-amber-400">
               {switchWarning}
             </div>
           )}
-          <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-3">
-          <div className="grid grid-cols-2 gap-2">
-            {ditModelList.map(m => {
-              const catalog = DIT_CATALOG[m.name];
-              const dlState = downloadStates[m.name];
-              const isDownloading = dlState?.status === 'downloading';
-              const downloadError = dlState?.status === 'failed' ? dlState.error : undefined;
-              return (
-                <ModelCard
-                  key={m.name}
-                  name={m.name}
-                  description={catalog?.description ?? 'DiT model'}
-                  size={catalog?.size ?? '4.5 GB'}
-                  isActive={activeModel === m.name}
-                  isPreloaded={m.is_preloaded || dlState?.status === 'done'}
-                  isLoaded={m.is_preloaded || dlState?.status === 'done'}
-                  isSwitching={switchingModel === m.name}
-                  isDownloading={isDownloading}
-                  downloadError={downloadError}
-                  onClick={() => handleSwitchModel(m.name)}
-                  onDownload={() => handleDownloadModel(m.name)}
-                />
-              );
-            })}
-          </div>
+          <div className="p-3">
+            <div className="grid grid-cols-2 gap-2">
+              {ditModelList.map(m => {
+                const catalog = DIT_MODELS[m.name];
+                const dlState = downloadStates[m.name];
+                const isDownloading = dlState?.status === 'downloading';
+                const downloadError = dlState?.status === 'failed' ? dlState.error : undefined;
+                return (
+                  <GenericModelCard
+                    key={m.name}
+                    name={m.name.replace('acestep-v15-', '')}
+                    description={catalog?.description ?? 'DiT model'}
+                    size={catalog?.size ?? '4.5 GB'}
+                    isActive={activeModel === m.name}
+                    isAvailable={m.is_preloaded || dlState?.status === 'done'}
+                    isSwitching={switchingModel === m.name}
+                    isDownloading={isDownloading}
+                    downloadError={downloadError}
+                    onClick={() => handleSwitchModel(m.name)}
+                    onDownload={() => handleDownloadModel(m.name)}
+                    activeLabel="Active"
+                    availableLabel="Ready"
+                  />
+                );
+              })}
+            </div>
           </div>
         </div>
 
         {/* ===== LM MODELS ===== */}
-        <div className="space-y-2">
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">LM Models</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Language models for prompt understanding</p>
+        <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
+          <div className="px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
+            <h2 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">LM Models</h2>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">Language models for prompt understanding</p>
           </div>
-          <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-3">
-          <div className="grid grid-cols-2 gap-2">
-            {(lmModels.length > 0 ? lmModels : Object.keys(LM_CATALOG).map(name => ({ name, is_loaded: false }))).map(m => {
-              const catalog = LM_CATALOG[m.name];
-              const dlState = downloadStates[m.name];
-              const isDownloading = dlState?.status === 'downloading';
-              const downloadError = dlState?.status === 'failed' ? dlState.error : undefined;
-              // LM models returned by inventory are always on disk — is_loaded means in GPU memory
-              // For UI purposes, if it's in the inventory list, it's downloaded
-              const isLoaded = true;
-              return (
-                <LmModelCard
-                  key={m.name}
-                  name={m.name}
-                  description={catalog?.description ?? 'Language model'}
-                  size={catalog?.size ?? '?'}
-                  isActive={selectedLm === m.name}
-                  isLoaded={isLoaded}
-                  isDownloading={isDownloading}
-                  downloadError={downloadError}
-                  onClick={() => handleSelectLm(m.name)}
-                  onDownload={() => handleDownloadModel(m.name)}
-                />
-              );
-            })}
-          </div>
+          <div className="p-3">
+            <div className="grid grid-cols-2 gap-2">
+              {(lmModels.length > 0 ? lmModels : Object.keys(LM_MODELS).map(name => ({ name, is_loaded: false }))).map(m => {
+                const catalog = LM_MODELS[m.name];
+                const dlState = downloadStates[m.name];
+                const isDownloading = dlState?.status === 'downloading';
+                const downloadError = dlState?.status === 'failed' ? dlState.error : undefined;
+                return (
+                  <GenericModelCard
+                    key={m.name}
+                    name={m.name.replace('acestep-5Hz-lm-', '')}
+                    description={catalog?.description ?? 'Language model'}
+                    size={catalog?.size ?? '?'}
+                    isActive={selectedLm === m.name}
+                    isAvailable={true}
+                    isSwitching={false}
+                    isDownloading={isDownloading}
+                    downloadError={downloadError}
+                    onClick={() => handleSelectLm(m.name)}
+                    onDownload={() => handleDownloadModel(m.name)}
+                    activeLabel="Selected"
+                    availableLabel="Loaded"
+                  />
+                );
+              })}
+            </div>
           </div>
         </div>
 
         {/* ===== LYRICS MODELS ===== */}
-        <div className="space-y-2">
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Lyrics Models</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Local LLM for generating song lyrics (runs on CPU)</p>
+        <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
+          <div className="px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
+            <h2 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Lyrics Models</h2>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">Local LLM for generating song lyrics (runs on CPU)</p>
           </div>
-          <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-3">
-          <div className="grid grid-cols-2 gap-2">
-            {LYRICS_CATALOG.map(m => {
-              const serverModel = lyricsModels.find(sm => sm.id === m.id);
-              const dlState = lyricsDownloadStates[m.id];
-              const isDownloading = dlState?.status === 'downloading' || (serverModel?.downloading ?? false);
-              const isDownloaded = (serverModel?.downloaded ?? false) || dlState?.status === 'done';
-              const downloadError = dlState?.status === 'failed' ? dlState.error : undefined;
-              return (
-                <LyricsModelCard
-                  key={m.id}
-                  id={m.id}
-                  name={m.name}
-                  description={m.description}
-                  size={m.size}
-                  isSelected={selectedLyricsModel === m.id}
-                  isDownloaded={isDownloaded}
-                  isDownloading={isDownloading}
-                  downloadError={downloadError}
-                  onSelect={() => handleSelectLyricsModel(m.id)}
-                  onDownload={() => handleDownloadLyricsModel(m.id)}
-                />
-              );
-            })}
-          </div>
+          <div className="p-3">
+            <div className="grid grid-cols-2 gap-2">
+              {LYRICS_MODELS.map(m => {
+                const serverModel = lyricsModels.find(sm => sm.id === m.id);
+                const dlState = lyricsDownloadStates[m.id];
+                const isDownloading = dlState?.status === 'downloading' || (serverModel?.downloading ?? false);
+                const isDownloaded = (serverModel?.downloaded ?? false) || dlState?.status === 'done';
+                const downloadError = dlState?.status === 'failed' ? dlState.error : undefined;
+                return (
+                  <GenericModelCard
+                    key={m.id}
+                    name={m.name}
+                    description={m.description}
+                    size={m.size}
+                    isActive={selectedLyricsModel === m.id}
+                    isAvailable={isDownloaded}
+                    isSwitching={false}
+                    isDownloading={isDownloading}
+                    downloadError={downloadError}
+                    onClick={() => handleSelectLyricsModel(m.id)}
+                    onDownload={() => handleDownloadLyricsModel(m.id)}
+                    activeLabel="Selected"
+                    availableLabel="Downloaded"
+                  />
+                );
+              })}
+            </div>
           </div>
         </div>
 
         {/* ===== GENERATION DEFAULTS ===== */}
-        <div className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Generation Defaults</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Persisted defaults for new generations</p>
+        <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
+          <div className="px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
+            <h2 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Generation Defaults</h2>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">Persisted defaults for new generations</p>
           </div>
 
-          <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-4 space-y-4">
+          <div className="p-4 space-y-4">
             {/* Row 1: Audio Format + Inference Method */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Output file format. MP3 is smaller, FLAC is lossless quality.">Audio Format</label>
+                <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400" title="Output file format. MP3 is smaller, FLAC is lossless quality.">Audio Format</label>
                 <select
                   value={audioFormat}
                   onChange={(e) => { const v = e.target.value as 'mp3' | 'flac'; setAudioFormat(v); persist('ace-audioFormat', v); }}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
+                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/5 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
                 >
                   <option value="mp3">MP3 (smaller)</option>
                   <option value="flac">FLAC (lossless)</option>
                 </select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="ODE is deterministic and repeatable. SDE adds randomness for variety.">Inference Method</label>
+                <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400" title="ODE is deterministic and repeatable. SDE adds randomness for variety.">Inference Method</label>
                 <select
                   value={inferMethod}
                   onChange={(e) => { const v = e.target.value as 'ode' | 'sde'; setInferMethod(v); persist('ace-inferMethod', v); }}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
+                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/5 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
                 >
                   <option value="ode">ODE (deterministic)</option>
                   <option value="sde">SDE (stochastic)</option>
@@ -744,7 +587,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
               />
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Queue multiple sequential generation jobs.">Bulk Generate</label>
+                  <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400" title="Queue multiple sequential generation jobs.">Bulk Generate</label>
                   <span className="text-xs font-mono text-zinc-900 dark:text-white bg-zinc-100 dark:bg-black/20 px-2 py-0.5 rounded">
                     {bulkCount}
                   </span>
@@ -796,11 +639,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
             {/* Row: LM Backend + Shift */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="PyTorch (pt) is stable. vLLM is faster but may crash on some GPUs.">LM Backend</label>
+                <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400" title="PyTorch (pt) is stable. vLLM is faster but may crash on some GPUs.">LM Backend</label>
                 <select
                   value={lmBackend}
                   onChange={(e) => { const v = e.target.value as 'pt' | 'vllm'; setLmBackend(v); persist('ace-lmBackend', v); }}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/5 rounded-lg px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none"
                 >
                   <option value="pt">PyTorch (pt)</option>
                   <option value="vllm">vLLM</option>
@@ -823,7 +666,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Random seed gives variety. Fixed seed reproduces the exact same result.">Random Seed</span>
+                  <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400" title="Random seed gives variety. Fixed seed reproduces the exact same result.">Random Seed</span>
                   <button
                     onClick={() => { const v = !randomSeed; setRandomSeed(v); persist('ace-randomSeed', v); }}
                     className={`w-10 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 border border-zinc-200 dark:border-white/5 ${randomSeed ? 'bg-pink-600' : 'bg-zinc-300 dark:bg-black/40'}`}
@@ -837,12 +680,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
                     value={seed}
                     onChange={(e) => { const v = Number(e.target.value); setSeed(v); persist('ace-seed', v); }}
                     placeholder="Fixed seed"
-                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/5 rounded-lg px-3 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none"
                   />
                 )}
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Chain-of-thought reasoning. The LM thinks about structure before generating. Slightly slower.">Thinking / CoT</span>
+                <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400" title="Chain-of-thought reasoning. The LM thinks about structure before generating. Slightly slower.">Thinking / CoT</span>
                 <button
                   onClick={() => { const v = !thinking; setThinking(v); persist('ace-thinking', v); }}
                   className={`w-10 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 border border-zinc-200 dark:border-white/5 ${thinking ? 'bg-pink-600' : 'bg-zinc-300 dark:bg-black/40'}`}
@@ -855,13 +698,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
         </div>
 
         {/* ===== LM PARAMETERS ===== */}
-        <div className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">LM Parameters</h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Control lyric and caption generation behavior</p>
+        <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
+          <div className="px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
+            <h2 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">LM Parameters</h2>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">Control lyric and caption generation behavior</p>
           </div>
 
-          <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-4 space-y-4">
+          <div className="p-4 space-y-4">
             {/* Row: Temperature + CFG Scale */}
             <div className="grid grid-cols-2 gap-3">
               <EditableSlider
@@ -913,12 +756,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
 
             {/* LM Negative Prompt */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Describe what to avoid. Only works when LM CFG Scale > 1.">LM Negative Prompt</label>
+              <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400" title="Describe what to avoid. Only works when LM CFG Scale > 1.">LM Negative Prompt</label>
               <textarea
                 value={lmNegativePrompt}
                 onChange={(e) => { setLmNegativePrompt(e.target.value); persist('ace-lmNegativePrompt', e.target.value); }}
                 placeholder="Things to avoid in generation..."
-                className="w-full h-16 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg p-2 text-xs text-zinc-900 dark:text-white focus:outline-none resize-none"
+                className="w-full h-16 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/5 rounded-lg p-2 text-xs text-zinc-900 dark:text-white focus:outline-none resize-none"
               />
               <p className="text-[10px] text-zinc-500">Used when CFG scale &gt; 1</p>
             </div>

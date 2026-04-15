@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Sparkles, ChevronDown, Settings2, Trash2, Music2, Sliders, Dices, RefreshCw, Plus, Upload, Play, Pause, Loader2, Wand2 } from 'lucide-react';
+import { Sparkles, ChevronDown, Settings2, Trash2, Music2, Sliders, Dices, RefreshCw, Upload, Play, Pause, Loader2, Wand2 } from 'lucide-react';
 import { GenerationParams, Song } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
 import { generateApi } from '../services/api';
 import { MAIN_STYLES } from '../data/genres';
+import { DIT_MODELS, getModelDisplayName, isTurboModel } from '../data/models';
 import { EditableSlider } from './EditableSlider';
 
 interface ReferenceTrack {
@@ -55,8 +56,6 @@ const TRACK_NAMES = [
   'woodwinds', 'brass', 'fx', 'synth', 'strings', 'percussion',
   'keyboard', 'guitar', 'bass', 'drums', 'backing_vocals', 'vocals',
 ];
-
-// SIMPLE_GENRES removed — Simple mode now uses MAIN_STYLES from genres.ts
 
 const VOCAL_LANGUAGE_KEYS = [
   { value: 'unknown', key: 'autoInstrumental' as const },
@@ -216,7 +215,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
     const v = localStorage.getItem('ace-thinking');
     return v !== null ? v === 'true' : false;
   });
-  const [enhance, setEnhance] = useState(false); // AI Enhance: uses LLM to enrich caption & generate metadata
   const [inferenceSteps, setInferenceSteps] = useState(() => {
     const stored = localStorage.getItem('ace-inferenceSteps');
     return stored ? Number(stored) : 5;
@@ -283,33 +281,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
     if (fetchedModels.length > 0) {
       return fetchedModels.map(m => ({ id: m.name, name: m.name }));
     }
-    return [
-      { id: 'acestep-v15-base', name: 'acestep-v15-base' },
-      { id: 'acestep-v15-sft', name: 'acestep-v15-sft' },
-      { id: 'acestep-v15-turbo', name: 'acestep-v15-turbo' },
-      { id: 'acestep-v15-turbo-shift1', name: 'acestep-v15-turbo-shift1' },
-      { id: 'acestep-v15-turbo-shift3', name: 'acestep-v15-turbo-shift3' },
-      { id: 'acestep-v15-turbo-continuous', name: 'acestep-v15-turbo-continuous' },
-    ];
+    return Object.keys(DIT_MODELS).map(id => ({ id, name: id }));
   }, [fetchedModels]);
-
-  // Map model ID to short display name
-  const getModelDisplayName = (modelId: string): string => {
-    const mapping: Record<string, string> = {
-      'acestep-v15-base': '1.5B',
-      'acestep-v15-sft': '1.5S',
-      'acestep-v15-turbo-shift1': '1.5TS1',
-      'acestep-v15-turbo-shift3': '1.5TS3',
-      'acestep-v15-turbo-continuous': '1.5TC',
-      'acestep-v15-turbo': '1.5T',
-    };
-    return mapping[modelId] || modelId;
-  };
-
-  // Check if model is a turbo variant
-  const isTurboModel = (modelId: string): boolean => {
-    return modelId.includes('turbo');
-  };
 
   const [isUploadingReference, setIsUploadingReference] = useState(false);
   const [isUploadingSource, setIsUploadingSource] = useState(false);
@@ -1317,7 +1290,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         randomSeed: randomSeed || i > 0, // Force random for subsequent bulk jobs
         seed: jobSeed,
         thinking,
-        enhance,
+        enhance: false,
         audioFormat: lsAudioFormat,
         inferMethod: lsInferMethod,
         lmBackend: lsLmBackend,
