@@ -24,11 +24,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install FFmpeg 7 shared libraries (torchcodec needs libavutil.so.59+)
-# Ubuntu 22.04 only has FFmpeg 4 in default repos
-RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common \
-    && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+# Ubuntu 22.04 only has FFmpeg 4. Build minimal FFmpeg 7 from source (shared libs only).
+RUN apt-get update && apt-get install -y --no-install-recommends nasm pkg-config libmp3lame-dev \
+    && curl -sL https://ffmpeg.org/releases/ffmpeg-7.0.2.tar.xz | tar xJ -C /tmp \
+    && cd /tmp/ffmpeg-7.0.2 \
+    && ./configure --prefix=/usr --enable-shared --disable-static --disable-doc --enable-libmp3lame --enable-gpl \
+    && make -j$(nproc) && make install && ldconfig \
+    && cd / && rm -rf /tmp/ffmpeg-7.0.2 \
+    && apt-get purge -y nasm && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Python venv
