@@ -634,8 +634,24 @@ router.get('/sample-preview', authMiddleware, async (req: AuthenticatedRequest, 
     const idx = parseInt(req.query.idx as string) || 0;
 
     const data = await aceStepFetch(`/v1/dataset/sample/${idx}`);
+    const sample = data.data || data;
 
-    res.json(data);
+    // Map ACE-Step field names to our frontend field names
+    res.json({
+      audio: sample.audio_path,
+      filename: sample.filename,
+      caption: sample.caption || '',
+      genre: sample.genre || '',
+      promptOverride: sample.prompt_override || 'Use Global Ratio',
+      lyrics: sample.lyrics || '',
+      bpm: sample.bpm || null,
+      key: sample.keyscale || '',
+      timeSignature: sample.timesignature || '',
+      duration: sample.duration || 0,
+      language: sample.language || 'unknown',
+      instrumental: sample.is_instrumental ?? true,
+      rawLyrics: sample.raw_lyrics || '',
+    });
   } catch (error) {
     console.error('[Training] Sample preview error:', error);
     const status = (error as any).status || 500;
