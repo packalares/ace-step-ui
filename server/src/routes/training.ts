@@ -668,15 +668,16 @@ router.post('/save-sample', authMiddleware, async (req: AuthenticatedRequest, re
     const data = await aceStepFetch(`/v1/dataset/sample/${idx}`, {
       method: 'PUT',
       body: {
+        sample_idx: idx,
         caption: caption ?? '',
         genre: genre ?? '',
-        prompt_override: promptOverride ?? 'Use Global Ratio',
+        prompt_override: promptOverride ?? null,
         lyrics: lyrics ?? '',
-        bpm: bpm ?? 120,
-        key: key ?? '',
-        time_signature: timeSignature ?? '',
+        bpm: bpm || null,
+        keyscale: key ?? '',
+        timesignature: timeSignature ?? '',
         language: language ?? 'instrumental',
-        instrumental: instrumental ?? true,
+        is_instrumental: instrumental ?? true,
       },
     });
 

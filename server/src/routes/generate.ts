@@ -687,10 +687,134 @@ router.get('/models', async (_req, res: Response) => {
   }
 });
 
+// POST /api/generate/simple — Orchestrate Simple mode: get metadata + lyrics
+router.post('/simple', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { description, genre, instrumental } = req.body as {
+      description: string;
+      genre?: string;
+      instrumental?: boolean;
+    };
+
+    const apiUrl = config.acestep.apiUrl || 'http://localhost:8000';
+    const userInput = [genre, description].filter(Boolean).join(' ').trim();
+
+    // Get description: use user input if provided, otherwise get random from ACE-Step
+    let caption = '';
+    let language = 'en';
+
+    if (userInput) {
+      caption = userInput;
+    } else {
+      // No user input — get a random description
+      try {
+        const sampleRes = await fetch(`${apiUrl}/create_random_sample`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+          signal: AbortSignal.timeout(10_000),
+        });
+        const sampleData = await sampleRes.json() as any;
+        const sample = sampleData?.data || {};
+        caption = sample.description || 'upbeat pop song';
+        language = sample.vocal_language || 'en';
+      } catch {
+        caption = 'upbeat pop song';
+      }
+    }
+
+    // Step 2: Generate lyrics if not instrumental (matching the language)
+    let lyrics = '';
+    if (!instrumental) {
+      try {
+        const ACESTEP_DIR = process.env.ACESTEP_PATH || '/app/ACE-Step-1.5';
+        const lyricsModelsDir = path.join(ACESTEP_DIR, 'checkpoints', 'lyrics-models');
+
+        let modelPath = '';
+        try {
+          const { readdirSync } = await import('fs');
+          const files = readdirSync(lyricsModelsDir);
+          const gguf = files.find((f: string) => f.endsWith('.gguf'));
+          if (gguf) modelPath = path.join(lyricsModelsDir, gguf);
+        } catch {}
+
+        if (modelPath) {
+          const __dirname_local = path.dirname(fileURLToPath(import.meta.url));
+          const LYRICS_SCRIPT = path.join(__dirname_local, '../../scripts/lyrics_generate.py');
+
+          const cmdArg = JSON.stringify({
+            action: 'generate',
+            model_path: modelPath,
+            genre: genre || '',
+            topic: caption,
+            mood: '',
+            language: language === 'unknown' ? 'english' : language,
+          });
+
+          lyrics = await new Promise<string>((resolve) => {
+            const proc = spawn('python3', [LYRICS_SCRIPT, cmdArg], {
+              cwd: ACESTEP_DIR,
+              env: { ...process.env, ACESTEP_PATH: ACESTEP_DIR },
+            });
+
+            let stdout = '';
+            proc.stdout.on('data', (d) => { stdout += d.toString(); });
+            proc.stderr.on('data', () => {});
+
+            const timeout = setTimeout(() => { proc.kill('SIGTERM'); resolve(''); }, 120_000);
+
+            proc.on('close', (code) => {
+              clearTimeout(timeout);
+              if (code === 0 && stdout) {
+                try { resolve(JSON.parse(stdout.trim()).lyrics || ''); } catch { resolve(''); }
+              } else resolve('');
+            });
+            proc.on('error', () => { clearTimeout(timeout); resolve(''); });
+          });
+        }
+      } catch {}
+    }
+
+    res.json({
+      caption,
+      lyrics: instrumental ? '[Instrumental]' : lyrics,
+      language,
+    });
+  } catch (error) {
+    console.error('Simple generate error:', error);
+    res.status(500).json({ error: (error as Error).message || 'Simple generation failed' });
+  }
+});
+
 // GET /api/generate/random-description — Load a random simple description from ACE-Step
-router.get('/random-description', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+router.get('/random-description', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const apiUrl = config.acestep.apiUrl || 'http://localhost:8000';
+    const lang = (req.query.lang as string) || '';
+    const maxTries = lang ? 10 : 1;
+
+    for (let attempt = 0; attempt < maxTries; attempt++) {
+      const apiRes = await fetch(`${apiUrl}/create_random_sample`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const data = await apiRes.json() as any;
+      const sample = data?.data || data || {};
+      const sampleLang = sample.vocal_language || 'unknown';
+
+      // If no lang filter or it matches, return immediately
+      if (!lang || sampleLang === lang || sampleLang === 'unknown') {
+        res.json({
+          description: sample.description || sample.caption || sample.prompt || '',
+          instrumental: sample.instrumental || false,
+          vocalLanguage: sampleLang,
+        });
+        return;
+      }
+    }
+
+    // Exhausted tries, return the last result anyway
     const apiRes = await fetch(`${apiUrl}/create_random_sample`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -699,7 +823,7 @@ router.get('/random-description', authMiddleware, async (_req: AuthenticatedRequ
     const data = await apiRes.json() as any;
     const sample = data?.data || data || {};
     res.json({
-      description: sample.caption || sample.prompt || '',
+      description: sample.description || sample.caption || sample.prompt || '',
       instrumental: sample.instrumental || false,
       vocalLanguage: sample.vocal_language || 'unknown',
     });
@@ -943,7 +1067,7 @@ router.get('/inventory', async (_req, res: Response) => {
   }
 });
 
-// POST /api/generate/models/switch — proxy to ACE-Step's /v1/init + reinitialize
+// POST /api/generate/models/switch — proxy to ACE-Step's /v1/init
 router.post('/models/switch', async (req, res: Response) => {
   try {
     const { model, init_llm, lm_model_path } = req.body;
@@ -953,17 +1077,6 @@ router.post('/models/switch', async (req, res: Response) => {
     }
     const apiUrl = config.acestep.apiUrl || 'http://localhost:8000';
 
-    // First reinitialize to ensure model weights are loaded (ACESTEP_NO_INIT=true means lazy)
-    try {
-      await fetch(`${apiUrl}/v1/reinitialize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-        signal: AbortSignal.timeout(300000),
-      });
-    } catch { /* ignore — reinitialize may not be needed */ }
-
-    // Then init the specific model + optional LLM
     const body: Record<string, unknown> = { model };
     if (init_llm) body.init_llm = true;
     if (lm_model_path) body.lm_model_path = lm_model_path;

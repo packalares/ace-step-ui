@@ -318,4 +318,37 @@ router.post('/generate-full', authMiddleware, async (req: AuthenticatedRequest, 
   }
 });
 
+// POST /api/lyrics/generate-style — generate Suno-like style description
+router.post('/generate-style', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { genre } = req.body;
+
+    const resolvedModelId = getFirstDownloadedModel();
+    if (!resolvedModelId) {
+      res.status(400).json({ error: 'No lyrics model downloaded. Please download one from Settings.' });
+      return;
+    }
+
+    const modelPath = getModelPath(resolvedModelId);
+    if (!modelPath || !fs.existsSync(modelPath)) {
+      res.status(400).json({ error: 'Model not found on disk.' });
+      return;
+    }
+
+    console.log(`[Lyrics] Generating style with model ${resolvedModelId}...`);
+
+    const result = await runPythonScript({
+      action: 'generate_style',
+      model_path: modelPath,
+      genre: genre || '',
+    }, 120000);
+
+    const parsed = JSON.parse(result);
+    res.json(parsed);
+  } catch (error) {
+    console.error('Lyrics generate-style error:', error);
+    res.status(500).json({ error: (error as Error).message || 'Style generation failed' });
+  }
+});
+
 export default router;

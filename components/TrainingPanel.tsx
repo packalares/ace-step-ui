@@ -495,15 +495,50 @@ export const TrainingPanel: React.FC = () => {
   const handlePreprocess = useCallback(async () => {
     if (!token) return;
     setPreprocessing(true);
-    setPreprocessStatus('Preprocessing...');
+    setPreprocessStatus('Starting preprocessing...');
     try {
-      const result = await trainingApi.preprocess({
-        datasetPath: savePath || datasetPath,
-        outputDir: preprocessOutputDir,
-      }, token);
-      setPreprocessStatus(result.message || result.status);
-      markStep('preprocess');
-      setTimeout(() => advanceToNext('preprocess'), 600);
+      const startRes = await fetch('/api/training/preprocess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ datasetPath: savePath || datasetPath, outputDir: preprocessOutputDir }),
+      });
+      const result = await startRes.json();
+      const taskId = result.task_id;
+
+      if (!taskId) {
+        setPreprocessStatus(result.status || result.error || 'No task ID returned');
+        setPreprocessing(false);
+        return;
+      }
+
+      setPreprocessStatus('Preprocessing audio samples...');
+
+      // Poll for completion
+      for (let i = 0; i < 360; i++) { // max 30 min
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const statusRes = await fetch('/api/training/preprocess-status', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!statusRes.ok) continue;
+          const statusData = await statusRes.json();
+          const s = statusData.data || statusData;
+
+          if (s.status === 'completed' || s.status === 'success' || s.status === 'finished') {
+            setPreprocessStatus('Preprocessing complete!');
+            markStep('preprocess');
+            setTimeout(() => advanceToNext('preprocess'), 600);
+            return;
+          }
+          if (s.status === 'failed' || s.error) {
+            setPreprocessStatus(`Failed: ${s.error || s.progress || 'Unknown error'}`);
+            return;
+          }
+          // Still running
+          setPreprocessStatus(s.progress || s.message || `Preprocessing... ${s.current || ''}/${s.total || '?'}`);
+        } catch { /* ignore */ }
+      }
+      setPreprocessStatus('Timed out waiting for preprocessing');
     } catch (error) {
       setPreprocessStatus(`Error: ${error instanceof Error ? error.message : 'Preprocessing failed'}`);
     } finally {
@@ -526,18 +561,51 @@ export const TrainingPanel: React.FC = () => {
   const handleStartTraining = useCallback(async () => {
     if (!token) return;
     setIsTraining(true);
-    setTrainingProgress(t('startingTraining'));
+    setTrainingProgress('Starting training...');
     setTrainingLog('');
     setTrainingMetrics(null);
     try {
-      const result = await trainingApi.startTraining({
+      await trainingApi.startTraining({
         ...trainingParams,
         resumeCheckpoint: trainingParams.resumeCheckpoint || null,
       }, token);
-      setTrainingProgress(result.progress as string);
-      setTrainingLog(result.log as string);
-      setTrainingMetrics(result.metrics);
-      markStep('train');
+
+      // Poll training status
+      for (let i = 0; i < 3600; i++) { // max 5 hours (5s * 3600)
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const statusRes = await fetch('/api/training/training-status', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!statusRes.ok) continue;
+          const statusData = await statusRes.json();
+          const s = statusData.data || statusData;
+
+          const isDone = s.is_training === false || s.status === 'completed' || s.status === 'finished' || s.status === 'idle' || s.status === 'not_running' || (typeof s.status === 'string' && s.status.includes('complete'));
+          const isFailed = s.status === 'failed' || s.status === 'error' || (typeof s.status === 'string' && s.status.includes('❌'));
+
+          if (isFailed) {
+            setTrainingProgress(`Training failed: ${s.error || s.status || 'Unknown error'}`);
+            break;
+          }
+          if (isDone) {
+            const finalLoss = s.current_loss || s.loss_history?.[s.loss_history.length - 1]?.loss;
+            const doneMsg = typeof s.status === 'string' && s.status.includes('complete') ? s.status : 'Training complete!';
+            setTrainingProgress(`${doneMsg}${finalLoss ? ` | Final loss: ${Number(finalLoss).toFixed(4)}` : ''}`);
+            setTrainingLog('');
+            markStep('train');
+            break;
+          }
+
+          // Still running — show status from API (includes checkpoint saves, etc)
+          const epoch = s.current_epoch ?? s.epoch ?? '?';
+          const totalEpochs = s.total_epochs ?? trainingParams.epochs ?? '?';
+          const loss = s.current_loss != null ? ` | Loss: ${Number(s.current_loss).toFixed(4)}` : '';
+          const statusLine = s.status || `Training... Epoch ${epoch}/${totalEpochs}`;
+          setTrainingProgress(`${statusLine}${loss}`);
+          if (s.training_log && s.training_log !== 'Starting...') setTrainingLog(s.training_log);
+        } catch { /* ignore poll errors */ }
+      }
     } catch (error) {
       setTrainingProgress(`${t('error')}: ${error instanceof Error ? error.message : 'Failed'}`);
     } finally {

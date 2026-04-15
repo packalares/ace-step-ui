@@ -379,12 +379,27 @@ export const generateApi = {
     error?: string;
   }> => api('/api/generate/format', { method: 'POST', body: params, token }),
 
+  // Simple mode: orchestrate metadata + lyrics generation
+  simpleGenerate: (params: {
+    description: string;
+    genre?: string;
+    instrumental?: boolean;
+  }, token: string): Promise<{
+    caption: string;
+    lyrics: string;
+    bpm: number | null;
+    key: string;
+    timeSignature: string;
+    duration: number;
+    vocal_language: string;
+  }> => api('/api/generate/simple', { method: 'POST', body: params, token }),
+
   // Random description from Gradio's example library
-  getRandomDescription: (token: string): Promise<{
+  getRandomDescription: (token: string, lang?: string): Promise<{
     description: string;
     instrumental: boolean;
     vocalLanguage: string;
-  }> => api('/api/generate/random-description', { token }),
+  }> => api(`/api/generate/random-description${lang ? `?lang=${lang}` : ''}`, { token }),
 
   // LoRA Inference (requires ACE-Step training fork)
   loadLora: (params: {

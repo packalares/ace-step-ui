@@ -141,6 +141,25 @@ if __name__ == "__main__":
         )
         print(json.dumps(result))
 
+    elif action == "generate_style":
+        from llama_cpp import Llama
+        model = Llama(model_path=cmd["model_path"], n_ctx=4096, n_threads=4, n_gpu_layers=0, verbose=False)
+        genre = cmd.get("genre", "")
+        prompt = "Generate a creative music production style description"
+        if genre:
+            prompt += f" for {genre} music"
+        response = model.create_chat_completion(
+            messages=[
+                {"role": "system", "content": "You are a music production expert. Generate a detailed music production style description using comma-separated tags describing: genre, sub-genre, instruments, production techniques, sonic qualities, tempo feel. Be specific and creative. Include real instrument names, effects, and production terms. Output ONLY the style description, nothing else. Example: cinematic hip-hop, 90s boom bap, deep sub bass, dusty jazz piano, muted trumpet stabs, chopped vinyl samples, live drum breaks, punchy rimshots, tape saturation"},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=256,
+            temperature=0.95,
+            top_p=0.9,
+        )
+        text = response["choices"][0]["message"]["content"].strip()
+        print(json.dumps({"style": text}))
+
     elif action == "download":
         path = download_model(
             repo_id=cmd["repo_id"],
