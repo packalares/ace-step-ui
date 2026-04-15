@@ -21,7 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -sL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | \
+       tar xJ --strip-components=1 -C /usr/local/bin/ --wildcards '*/ffmpeg' '*/ffprobe'
 
 # Python venv
 RUN python3.11 -m venv /app/.venv
@@ -56,6 +58,12 @@ RUN cd /app/ACE-Step-1.5 && \
     echo "# Gradio imports disabled" > acestep/ui/gradio/events/generation/__init__.py && \
     echo "# Gradio imports disabled" > acestep/ui/gradio/interfaces/__init__.py
 
+# Patch: remove chunk_size/batch_size from auto-label (not supported by label_all_samples)
+RUN cd /app/ACE-Step-1.5 && \
+    sed -i '/chunk_size=request.chunk_size,/d; /batch_size=request.batch_size,/d' \
+    acestep/api/train_api_dataset_auto_label_async_route.py \
+    acestep/api/train_api_dataset_auto_label_sync_route.py 2>/dev/null || true
+
 ENV PYTHONPATH=/app/ACE-Step-1.5
 
 # Copy UI source
@@ -71,12 +79,11 @@ COPY App.tsx index.tsx types.ts global.d.ts vite-env.d.ts /app/ui/
 # Copy server source
 COPY server/ /app/ui/server/
 
-# Install Node dependencies + build React frontend
-RUN cd /app/ui && npm ci --omit=dev 2>/dev/null || npm install && \
-    cd /app/ui/server && npm ci 2>/dev/null || npm install
+# Install Node dependencies
+RUN cd /app/ui/server && npm ci 2>/dev/null || npm install
 
 # Build React frontend to static files
-RUN cd /app/ui && npx vite build --outDir /app/ui/dist || true
+RUN cd /app/ui && npm install --include=dev && npx vite build --outDir /app/ui/dist
 
 # Create dirs
 RUN mkdir -p /app/checkpoints /app/ui/server/data /app/ui/server/public/audio

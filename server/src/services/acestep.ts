@@ -38,7 +38,7 @@ function isAudioFile(name: string): boolean {
   return /\.(mp3|flac|wav|ogg|m4a|opus|aac)$/i.test(name);
 }
 
-async function fetchAPI(endpoint: string, body?: unknown): Promise<any> {
+export async function fetchAPI(endpoint: string, body?: unknown): Promise<any> {
   const url = `${ACESTEP_API}${endpoint}`;
   const opts: RequestInit = {
     method: body ? 'POST' : 'GET',
@@ -266,19 +266,25 @@ export function getJobRawResponse(jobId: string): unknown | null {
 // Generation via ACE-Step FastAPI
 // ---------------------------------------------------------------------------
 
-function resolveAudioPath(audioUrl: string): string {
+export function resolveAudioPath(audioUrl: string): string {
+  let srcPath = audioUrl;
   if (audioUrl.startsWith('/audio/')) {
-    return path.join(AUDIO_DIR, audioUrl.replace('/audio/', ''));
-  }
-  if (audioUrl.startsWith('http')) {
+    srcPath = path.join(AUDIO_DIR, audioUrl.replace('/audio/', ''));
+  } else if (audioUrl.startsWith('http')) {
     try {
       const parsed = new URL(audioUrl);
       if (parsed.pathname.startsWith('/audio/')) {
-        return path.join(AUDIO_DIR, parsed.pathname.replace('/audio/', ''));
+        srcPath = path.join(AUDIO_DIR, parsed.pathname.replace('/audio/', ''));
       }
     } catch { /* fall through */ }
   }
-  return audioUrl;
+  // ACE-Step API only accepts paths in /tmp or relative paths
+  if (path.isAbsolute(srcPath) && !srcPath.startsWith('/tmp')) {
+    const tmpPath = `/tmp/acestep_ref_${path.basename(srcPath)}`;
+    try { execSync(`cp "${srcPath}" "${tmpPath}"`); } catch { /* ignore */ }
+    return tmpPath;
+  }
+  return srcPath;
 }
 
 function buildReleaseTaskBody(params: GenerationParams): Record<string, unknown> {
@@ -719,3 +725,45 @@ export async function isACEStepAvailable(): Promise<boolean> {
 
 // Compatibility alias
 export const isGradioAvailable = isACEStepAvailable;
+
+// ---------------------------------------------------------------------------
+// Missing exports used by routes/generate.ts
+// ---------------------------------------------------------------------------
+
+/** Clean up an ACE-Step job (best-effort, non-critical) */
+export function cleanupJob(taskId: string): void {
+  fetch(`${ACESTEP_API}/cleanup/${taskId}`, { method: 'POST' }).catch(() => {});
+}
+
+/** Download audio from ACE-Step API into a Buffer */
+export async function downloadAudioToBuffer(audioUrl: string): Promise<{ buffer: Buffer }> {
+  const url = audioUrl.startsWith('http') ? audioUrl : `${ACESTEP_API}${audioUrl}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Failed to download audio: ${resp.status}`);
+  const arrayBuf = await resp.arrayBuffer();
+  return { buffer: Buffer.from(arrayBuf) };
+}
+
+/** Discover ACE-Step API endpoints */
+export async function discoverEndpoints(): Promise<string[]> {
+  try {
+    const resp = await fetch(`${ACESTEP_API}/openapi.json`);
+    if (!resp.ok) return [];
+    const spec = await resp.json() as any;
+    return Object.keys(spec.paths || {});
+  } catch {
+    return [];
+  }
+}
+
+/** Health check alias */
+export const checkSpaceHealth = isACEStepAvailable;
+
+/** Resolve python path inside ACE-Step venv */
+export function resolvePythonPath(acestepDir: string): string {
+  const venvPython = `${acestepDir}/venv/bin/python`;
+  if (existsSync(venvPython)) return venvPython;
+  const condaPython = `${acestepDir}/.conda/bin/python`;
+  if (existsSync(condaPython)) return condaPython;
+  return 'python3';
+}

@@ -22,6 +22,7 @@ import { Toast, ToastType } from './components/Toast';
 import { SearchPage } from './components/SearchPage';
 import { TrainingPanel } from './components/TrainingPanel';
 import { NewsPage } from './components/NewsPage';
+import { SettingsPage } from './components/SettingsPage';
 import { ConfirmDialog } from './components/ConfirmDialog';
 
 
@@ -288,6 +289,8 @@ function AppContent() {
         setCurrentView('search');
       } else if (path === '/news') {
         setCurrentView('news');
+      } else if (path === '/settings') {
+        setCurrentView('settings');
       }
     };
 
@@ -1299,6 +1302,13 @@ function AppContent() {
       case 'news':
         return <NewsPage />;
 
+      case 'settings':
+        return (
+          <SettingsPage
+            onNavigate={(v) => setCurrentView(v as any)}
+          />
+        );
+
       case 'create':
       default:
         return (
@@ -1315,6 +1325,10 @@ function AppContent() {
                 createdSongs={songs}
                 pendingAudioSelection={pendingAudioSelection}
                 onAudioSelectionApplied={() => setPendingAudioSelection(null)}
+                onNavigateToSettings={() => {
+                  setCurrentView('settings');
+                  window.history.pushState({}, '', '/settings');
+                }}
               />
             </div>
 
@@ -1403,6 +1417,8 @@ function AppContent() {
               window.history.pushState({}, '', '/search');
             } else if (v === 'news') {
               window.history.pushState({}, '', '/news');
+            } else if (v === 'settings') {
+              window.history.pushState({}, '', '/settings');
             }
             if (isMobile) setShowLeftSidebar(false);
           }}

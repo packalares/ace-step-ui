@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const config = {
-  port: parseInt(process.env.PORT || '3001', 10),
+  port: parseInt(process.env.ACE_STEP_UI_PORT || process.env.PORT || '3001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
 
   // SQLite database
@@ -18,7 +18,7 @@ export const config = {
 
   // ACE-Step API (local)
   acestep: {
-    apiUrl: process.env.ACESTEP_API_URL || 'http://localhost:8001',
+    apiUrl: process.env.ACESTEP_API_URL || `http://127.0.0.1:${process.env.ACE_STEP_PORT || '8000'}`,
   },
 
   // Pexels (optional - for video backgrounds)
@@ -35,10 +35,10 @@ export const config = {
     audioDir: process.env.AUDIO_DIR || path.join(__dirname, '../../public/audio'),
   },
 
-  // Training datasets (inside ACE-Step-1.5 so Gradio can access them)
+  // Training datasets (inside ACE-Step-1.5)
   datasets: {
-    dir: process.env.DATASETS_DIR || path.join(__dirname, '../../../ACE-Step-1.5/datasets'),
-    uploadsDir: process.env.DATASETS_UPLOADS_DIR || path.join(__dirname, '../../../ACE-Step-1.5/datasets/uploads'),
+    dir: process.env.DATASETS_DIR || path.join(process.env.ACESTEP_PATH || '/app/ACE-Step-1.5', 'datasets'),
+    uploadsDir: process.env.DATASETS_UPLOADS_DIR || path.join(process.env.ACESTEP_PATH || '/app/ACE-Step-1.5', 'datasets', 'uploads'),
   },
 
   // Simplified JWT (for local session, not critical security)

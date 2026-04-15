@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 import { pool } from '../db/pool.js';
 import { generateUUID } from '../db/sqlite.js';
 import { config } from '../config/index.js';
@@ -17,10 +18,20 @@ import {
   getJobRawResponse,
   downloadAudioToBuffer,
   resolvePythonPath,
+  resolveAudioPath,
+  fetchAPI,
 } from '../services/acestep.js';
 import { getStorageProvider } from '../services/storage/factory.js';
 
 const router = Router();
+
+// --- In-memory model download tracking ---
+interface DownloadState {
+  status: 'downloading' | 'done' | 'failed';
+  error?: string;
+  startedAt: number;
+}
+const downloadingModels = new Map<string, DownloadState>();
 
 // Auto-generate a song title from lyrics or style when none is provided
 function autoTitle(params: { title?: string; lyrics?: string; instrumental?: boolean; style?: string; songDescription?: string }): string {
@@ -613,15 +624,16 @@ router.get('/models', async (_req, res: Response) => {
       'acestep-v15-turbo-continuous',   // submodel
     ];
 
-    // Query ACE-Step /v1/models to get the currently loaded/active model
+    // Query ACE-Step /v1/model_inventory to get the currently loaded/active model
     let activeModel: string | null = null;
     try {
-      const apiRes = await fetch(`${config.acestep.apiUrl}/v1/models`);
+      const apiRes = await fetch(`${config.acestep.apiUrl}/v1/model_inventory`);
       if (apiRes.ok) {
         const data = await apiRes.json() as any;
-        const ace-stepModels = data?.data?.models || data?.models || [];
-        if (ace-stepModels.length > 0) {
-          activeModel = ace-stepModels[0]?.name || null;
+        const invModels = data?.data?.models || [];
+        const loaded = invModels.find((m: any) => m.is_loaded);
+        if (loaded) {
+          activeModel = loaded.name;
         }
       }
     } catch {
@@ -911,6 +923,340 @@ router.post('/format', authMiddleware, async (req: AuthenticatedRequest, res: Re
   } catch (error) {
     console.error('[Format] Route error:', error);
     res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// GET /api/generate/inventory — proxy to ACE-Step's /v1/model_inventory
+router.get('/inventory', async (_req, res: Response) => {
+  try {
+    const apiUrl = config.acestep.apiUrl || 'http://localhost:8000';
+    const apiRes = await fetch(`${apiUrl}/v1/model_inventory`, { signal: AbortSignal.timeout(10000) });
+    if (!apiRes.ok) {
+      res.status(apiRes.status).json({ error: `ACE-Step returned ${apiRes.status}` });
+      return;
+    }
+    const data = await apiRes.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Model inventory error:', error);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// POST /api/generate/models/switch — proxy to ACE-Step's /v1/init + reinitialize
+router.post('/models/switch', async (req, res: Response) => {
+  try {
+    const { model, init_llm, lm_model_path } = req.body;
+    if (!model) {
+      res.status(400).json({ error: 'model name is required' });
+      return;
+    }
+    const apiUrl = config.acestep.apiUrl || 'http://localhost:8000';
+
+    // First reinitialize to ensure model weights are loaded (ACESTEP_NO_INIT=true means lazy)
+    try {
+      await fetch(`${apiUrl}/v1/reinitialize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(300000),
+      });
+    } catch { /* ignore — reinitialize may not be needed */ }
+
+    // Then init the specific model + optional LLM
+    const body: Record<string, unknown> = { model };
+    if (init_llm) body.init_llm = true;
+    if (lm_model_path) body.lm_model_path = lm_model_path;
+    const apiRes = await fetch(`${apiUrl}/v1/init`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(300000),
+    });
+    if (!apiRes.ok) {
+      const errData = await apiRes.json().catch(() => ({}));
+      res.status(apiRes.status).json({ error: (errData as any).detail || `ACE-Step returned ${apiRes.status}` });
+      return;
+    }
+    const data = await apiRes.json();
+    res.json(data);
+  } catch (error) {
+    console.error('Model switch error:', error);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// POST /api/generate/models/download — start downloading a model in the background
+router.post('/models/download', async (req, res: Response) => {
+  try {
+    const { model } = req.body;
+    if (!model || typeof model !== 'string') {
+      res.status(400).json({ error: 'model name is required' });
+      return;
+    }
+
+    // Don't allow downloading the same model twice simultaneously
+    const existing = downloadingModels.get(model);
+    if (existing && existing.status === 'downloading') {
+      res.json({ status: 'downloading', model, message: 'Download already in progress' });
+      return;
+    }
+
+    const ACESTEP_DIR = process.env.ACESTEP_PATH || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../ACE-Step-1.5');
+    const checkpointsDir = path.join(ACESTEP_DIR, 'checkpoints');
+    const pythonPath = resolvePythonPath(ACESTEP_DIR);
+
+    // Mark as downloading
+    downloadingModels.set(model, { status: 'downloading', startedAt: Date.now() });
+
+    // Return immediately
+    res.json({ status: 'downloading', model });
+
+    // Spawn the Python download process in the background
+    const pythonCode = `from acestep.api.model_download import ensure_model_downloaded; print(ensure_model_downloaded('${model.replace(/'/g, "\\'")}', '${checkpointsDir.replace(/'/g, "\\'")}'))`;
+
+    const proc = spawn(pythonPath, ['-c', pythonCode], {
+      cwd: ACESTEP_DIR,
+      env: {
+        ...process.env,
+        ACESTEP_PATH: ACESTEP_DIR,
+        PYTHONPATH: ACESTEP_DIR,
+      },
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+      console.log(`[ModelDownload] ${model} stdout:`, data.toString().trim());
+    });
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+      // HuggingFace Hub prints progress to stderr, so only log, don't treat as error
+      console.log(`[ModelDownload] ${model} stderr:`, data.toString().trim());
+    });
+
+    // Set a 10-minute timeout
+    const timeout = setTimeout(() => {
+      console.error(`[ModelDownload] ${model} timed out after 10 minutes`);
+      proc.kill('SIGTERM');
+      downloadingModels.set(model, { status: 'failed', error: 'Download timed out after 10 minutes', startedAt: Date.now() });
+    }, 10 * 60 * 1000);
+
+    proc.on('close', async (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        console.log(`[ModelDownload] ${model} completed successfully`);
+        downloadingModels.set(model, { status: 'done', startedAt: Date.now() });
+
+        // Automatically call /v1/init to load the model after download
+        try {
+          const apiUrl = config.acestep.apiUrl || 'http://localhost:8000';
+          console.log(`[ModelDownload] Initializing model ${model} via /v1/init`);
+          const initRes = await fetch(`${apiUrl}/v1/init`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: model }),
+            signal: AbortSignal.timeout(300000), // 5 min for model loading
+          });
+          if (initRes.ok) {
+            console.log(`[ModelDownload] Model ${model} loaded successfully`);
+          } else {
+            console.warn(`[ModelDownload] /v1/init returned ${initRes.status} for ${model}`);
+          }
+        } catch (initErr) {
+          console.warn(`[ModelDownload] Failed to auto-init model ${model}:`, (initErr as Error).message);
+        }
+      } else {
+        const errorMsg = stderr || stdout || `Process exited with code ${code}`;
+        console.error(`[ModelDownload] ${model} failed:`, errorMsg);
+        downloadingModels.set(model, { status: 'failed', error: errorMsg, startedAt: Date.now() });
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timeout);
+      console.error(`[ModelDownload] ${model} spawn error:`, err.message);
+      downloadingModels.set(model, { status: 'failed', error: err.message, startedAt: Date.now() });
+    });
+  } catch (error) {
+    console.error('Model download error:', error);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// GET /api/generate/models/download-status — poll download progress
+router.get('/models/download-status', async (_req, res: Response) => {
+  try {
+    const downloads: Record<string, { status: string; error?: string }> = {};
+    downloadingModels.forEach((state, model) => {
+      downloads[model] = { status: state.status, ...(state.error ? { error: state.error } : {}) };
+    });
+    res.json({ downloads });
+  } catch (error) {
+    console.error('Download status error:', error);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Extract codes from source audio
+// ---------------------------------------------------------------------------
+router.post('/extract-codes', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { audioUrl } = req.body as { audioUrl: string };
+    if (!audioUrl) {
+      res.status(400).json({ error: 'audioUrl is required' });
+      return;
+    }
+
+    const srcPath = resolveAudioPath(audioUrl);
+
+    const submitResp = await fetchAPI('/release_task', {
+      task_type: 'text2music',
+      extract_codes_only: true,
+      src_audio_path: srcPath,
+      prompt: '',
+      lyrics: '',
+    });
+
+    const taskId = submitResp?.data?.task_id;
+    if (!taskId) {
+      res.status(500).json({ error: 'No task_id from ACE-Step' });
+      return;
+    }
+
+    // Poll for completion (up to 2 minutes)
+    const maxWaitMs = 2 * 60 * 1000;
+    const pollIntervalMs = 2000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+
+      const resp = await fetchAPI('/query_result', {
+        task_id_list: JSON.stringify([taskId]),
+      });
+
+      const data = resp?.data;
+      if (!Array.isArray(data) || data.length === 0) continue;
+
+      const job = data[0];
+      const status = job.status; // 0=running, 1=succeeded, 2=failed
+
+      if (status === 1) {
+        let resultItems: any[] = [];
+        try {
+          resultItems = typeof job.result === 'string' ? JSON.parse(job.result) : (job.result || []);
+        } catch { resultItems = []; }
+
+        const audioCodes = resultItems[0]?.audio_codes || '';
+        res.json({ codes: audioCodes });
+        return;
+      }
+
+      if (status === 2) {
+        let resultItems: any[] = [];
+        try {
+          resultItems = typeof job.result === 'string' ? JSON.parse(job.result) : (job.result || []);
+        } catch { resultItems = []; }
+        const errorMsg = resultItems[0]?.error || job.progress_text || 'Extract codes failed';
+        res.status(500).json({ error: errorMsg });
+        return;
+      }
+    }
+
+    res.status(504).json({ error: 'Extract codes timed out after 2 minutes' });
+  } catch (error) {
+    console.error('Extract codes error:', error);
+    res.status(500).json({ error: (error as Error).message || 'Extract codes failed' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Full analysis (transcribe) from source audio
+// ---------------------------------------------------------------------------
+router.post('/full-analysis', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { audioUrl } = req.body as { audioUrl: string };
+    if (!audioUrl) {
+      res.status(400).json({ error: 'audioUrl is required' });
+      return;
+    }
+
+    const srcPath = resolveAudioPath(audioUrl);
+
+    const submitResp = await fetchAPI('/release_task', {
+      task_type: 'text2music',
+      full_analysis_only: true,
+      src_audio_path: srcPath,
+      prompt: '',
+      lyrics: '',
+    });
+
+    const taskId = submitResp?.data?.task_id;
+    if (!taskId) {
+      res.status(500).json({ error: 'No task_id from ACE-Step' });
+      return;
+    }
+
+    // Poll for completion (up to 2 minutes)
+    const maxWaitMs = 2 * 60 * 1000;
+    const pollIntervalMs = 2000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+
+      const resp = await fetchAPI('/query_result', {
+        task_id_list: JSON.stringify([taskId]),
+      });
+
+      const data = resp?.data;
+      if (!Array.isArray(data) || data.length === 0) continue;
+
+      const job = data[0];
+      const status = job.status;
+
+      if (status === 1) {
+        let resultItems: any[] = [];
+        try {
+          resultItems = typeof job.result === 'string' ? JSON.parse(job.result) : (job.result || []);
+        } catch { resultItems = []; }
+
+        const item = resultItems[0] || {};
+        const metas = item.metas || {};
+        res.json({
+          codes: item.audio_codes || '',
+          bpm: metas.bpm,
+          key: metas.keyscale,
+          timeSignature: metas.timesignature,
+          duration: metas.duration,
+          genre: metas.genre,
+          prompt: metas.prompt,
+          lyrics: metas.lyrics,
+          language: metas.language,
+        });
+        return;
+      }
+
+      if (status === 2) {
+        let resultItems: any[] = [];
+        try {
+          resultItems = typeof job.result === 'string' ? JSON.parse(job.result) : (job.result || []);
+        } catch { resultItems = []; }
+        const errorMsg = resultItems[0]?.error || job.progress_text || 'Full analysis failed';
+        res.status(500).json({ error: errorMsg });
+        return;
+      }
+    }
+
+    res.status(504).json({ error: 'Full analysis timed out after 2 minutes' });
+  } catch (error) {
+    console.error('Full analysis error:', error);
+    res.status(500).json({ error: (error as Error).message || 'Full analysis failed' });
   }
 });
 

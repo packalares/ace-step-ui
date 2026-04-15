@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Sparkles, ChevronDown, Settings2, Trash2, Music2, Sliders, Dices, Hash, RefreshCw, Plus, Upload, Play, Pause, Loader2 } from 'lucide-react';
+import { Sparkles, ChevronDown, Settings2, Trash2, Music2, Sliders, Dices, RefreshCw, Plus, Upload, Play, Pause, Loader2 } from 'lucide-react';
 import { GenerationParams, Song } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
@@ -25,6 +25,7 @@ interface CreatePanelProps {
   createdSongs?: Song[];
   pendingAudioSelection?: { target: 'reference' | 'source'; url: string; title?: string } | null;
   onAudioSelectionApplied?: () => void;
+  onNavigateToSettings?: () => void;
 }
 
 const KEY_SIGNATURES = [
@@ -116,6 +117,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
   createdSongs = [],
   pendingAudioSelection,
   onAudioSelectionApplied,
+  onNavigateToSettings,
 }) => {
   const { isAuthenticated, token, user } = useAuth();
   const { t } = useI18n();
@@ -164,27 +166,33 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
     const stored = localStorage.getItem('ace-bulkCount');
     return stored ? Number(stored) : 1;
   });
-  const [guidanceScale, setGuidanceScale] = useState(9.0);
-  const [randomSeed, setRandomSeed] = useState(true);
-  const [seed, setSeed] = useState(-1);
-  const [thinking, setThinking] = useState(false); // Default false for GPU compatibility
-  const [enhance, setEnhance] = useState(false); // AI Enhance: uses LLM to enrich caption & generate metadata
-  const [audioFormat, setAudioFormat] = useState<'mp3' | 'flac'>('mp3');
-  const [inferenceSteps, setInferenceSteps] = useState(12);
-  const [inferMethod, setInferMethod] = useState<'ode' | 'sde'>('ode');
-  const [lmBackend, setLmBackend] = useState<'pt' | 'vllm'>('pt');
-  const [lmModel, setLmModel] = useState(() => {
-    return localStorage.getItem('ace-lmModel') || 'acestep-5Hz-lm-0.6B';
+  const [guidanceScale, setGuidanceScale] = useState(() => {
+    const stored = localStorage.getItem('ace-guidanceScale');
+    return stored ? Number(stored) : 5;
   });
-  const [shift, setShift] = useState(3.0);
+  const [randomSeed, setRandomSeed] = useState(() => {
+    const v = localStorage.getItem('ace-randomSeed');
+    return v !== null ? v === 'true' : true;
+  });
+  const [seed, setSeed] = useState(() => {
+    const v = localStorage.getItem('ace-seed');
+    return v !== null ? Number(v) : -1;
+  });
+  const [thinking, setThinking] = useState(() => {
+    const v = localStorage.getItem('ace-thinking');
+    return v !== null ? v === 'true' : false;
+  });
+  const [enhance, setEnhance] = useState(false); // AI Enhance: uses LLM to enrich caption & generate metadata
+  const [inferenceSteps, setInferenceSteps] = useState(() => {
+    const stored = localStorage.getItem('ace-inferenceSteps');
+    return stored ? Number(stored) : 5;
+  });
+  const [shift, setShift] = useState(() => {
+    const v = localStorage.getItem('ace-shift');
+    return v !== null ? Number(v) : 3.0;
+  });
 
-  // LM Parameters (under Expert)
-  const [showLmParams, setShowLmParams] = useState(false);
-  const [lmTemperature, setLmTemperature] = useState(0.8);
-  const [lmCfgScale, setLmCfgScale] = useState(2.2);
-  const [lmTopK, setLmTopK] = useState(0);
-  const [lmTopP, setLmTopP] = useState(0.92);
-  const [lmNegativePrompt, setLmNegativePrompt] = useState('NO USER INPUT');
+  // LM Parameters — read from localStorage (managed by SettingsPage)
 
   // Expert Parameters (now in Advanced section)
   const [referenceAudioUrl, setReferenceAudioUrl] = useState('');
@@ -230,8 +238,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     return localStorage.getItem('ace-model') || 'acestep-v15-turbo-shift3';
   });
-  const [showModelMenu, setShowModelMenu] = useState(false);
-  const modelMenuRef = useRef<HTMLDivElement>(null);
   const previousModelRef = useRef<string>(selectedModel);
   
   // Available models fetched from backend
@@ -275,8 +281,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
   const [isTranscribingReference, setIsTranscribingReference] = useState(false);
   const transcribeAbortRef = useRef<AbortController | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [extractingCodes, setExtractingCodes] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [isFormattingStyle, setIsFormattingStyle] = useState(false);
   const [isFormattingLyrics, setIsFormattingLyrics] = useState(false);
+  const [isGeneratingLyrics, setIsGeneratingLyrics] = useState(false);
+  const [isAutoFilling, setIsAutoFilling] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [dragKind, setDragKind] = useState<'file' | 'audio' | null>(null);
   const referenceInputRef = useRef<HTMLInputElement>(null);
@@ -338,20 +348,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
   const [isResizing, setIsResizing] = useState(false);
   const lyricsRef = useRef<HTMLDivElement>(null);
 
-
-  // Close model menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (modelMenuRef.current && !modelMenuRef.current.contains(event.target as Node)) {
-        setShowModelMenu(false);
-      }
-    };
-
-    if (showModelMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [showModelMenu]);
 
   // Auto-unload LoRA when model changes
   useEffect(() => {
@@ -463,15 +459,15 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         if (data.duration !== undefined) setDuration(data.duration);
         if (data.inference_steps !== undefined) setInferenceSteps(data.inference_steps);
         if (data.guidance_scale !== undefined) setGuidanceScale(data.guidance_scale);
-        if (data.audio_format !== undefined) setAudioFormat(data.audio_format);
-        if (data.infer_method !== undefined) setInferMethod(data.infer_method);
-        if (data.seed !== undefined) { setSeed(data.seed); setRandomSeed(false); }
-        if (data.shift !== undefined) setShift(data.shift);
-        if (data.lm_temperature !== undefined) setLmTemperature(data.lm_temperature);
-        if (data.lm_cfg_scale !== undefined) setLmCfgScale(data.lm_cfg_scale);
-        if (data.lm_top_k !== undefined) setLmTopK(data.lm_top_k);
-        if (data.lm_top_p !== undefined) setLmTopP(data.lm_top_p);
-        if (data.lm_negative_prompt !== undefined) setLmNegativePrompt(data.lm_negative_prompt);
+        if (data.audio_format !== undefined) localStorage.setItem('ace-audioFormat', data.audio_format);
+        if (data.infer_method !== undefined) localStorage.setItem('ace-inferMethod', data.infer_method);
+        if (data.seed !== undefined) { setSeed(data.seed); setRandomSeed(false); localStorage.setItem('ace-seed', String(data.seed)); localStorage.setItem('ace-randomSeed', 'false'); }
+        if (data.shift !== undefined) { setShift(data.shift); localStorage.setItem('ace-shift', String(data.shift)); }
+        if (data.lm_temperature !== undefined) localStorage.setItem('ace-lmTemperature', String(data.lm_temperature));
+        if (data.lm_cfg_scale !== undefined) localStorage.setItem('ace-lmCfgScale', String(data.lm_cfg_scale));
+        if (data.lm_top_k !== undefined) localStorage.setItem('ace-lmTopK', String(data.lm_top_k));
+        if (data.lm_top_p !== undefined) localStorage.setItem('ace-lmTopP', String(data.lm_top_p));
+        if (data.lm_negative_prompt !== undefined) localStorage.setItem('ace-lmNegativePrompt', data.lm_negative_prompt);
         if (data.task_type !== undefined) setTaskType(data.task_type);
         if (data.audio_codes !== undefined) setAudioCodes(data.audio_codes);
         if (data.repainting_start !== undefined) setRepaintingStart(data.repainting_start);
@@ -694,6 +690,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
       setIsFormattingLyrics(true);
     }
     try {
+      const lsLmTemperature = Number(localStorage.getItem('ace-lmTemperature') ?? '0.95');
+      const lsLmTopK = Number(localStorage.getItem('ace-lmTopK') ?? '60');
+      const lsLmTopP = Number(localStorage.getItem('ace-lmTopP') ?? '0.95');
+      const lsLmModel = localStorage.getItem('ace-lmModel') || 'acestep-5Hz-lm-0.6B';
+      const lsLmBackend = localStorage.getItem('ace-lmBackend') || 'pt';
       const result = await generateApi.formatInput({
         caption: style,
         lyrics: lyrics,
@@ -701,11 +702,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         duration: duration > 0 ? duration : undefined,
         keyScale: keyScale || undefined,
         timeSignature: timeSignature || undefined,
-        temperature: lmTemperature,
-        topK: lmTopK > 0 ? lmTopK : undefined,
-        topP: lmTopP,
-        lmModel: lmModel || 'acestep-5Hz-lm-0.6B',
-        lmBackend: lmBackend || 'pt',
+        temperature: lsLmTemperature,
+        topK: lsLmTopK > 0 ? lsLmTopK : undefined,
+        topP: lsLmTopP,
+        lmModel: lsLmModel,
+        lmBackend: lsLmBackend,
       }, token);
 
       if (result.caption || result.lyrics || result.bpm || result.duration) {
@@ -734,6 +735,82 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
       } else {
         setIsFormattingLyrics(false);
       }
+    }
+  };
+
+  // --- Lyrics LLM generation ---
+  const handleGenerateLyrics = async () => {
+    if (!token) return;
+    setIsGeneratingLyrics(true);
+    try {
+      const lyricsModel = localStorage.getItem('ace-lyricsModel') || '';
+      const langEntry = VOCAL_LANGUAGE_KEYS.find(l => l.value === vocalLanguage);
+      const langLabel = langEntry ? langEntry.key.replace('vocal', '') : 'English';
+      const res = await fetch('/api/lyrics/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          genre: style || '',
+          language: langLabel,
+          topic: songDescription || '',
+          mood: '',
+          structure: '',
+          modelId: lyricsModel || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Generation failed' }));
+        alert(err.error || 'Lyrics generation failed');
+        return;
+      }
+      const data = await res.json();
+      if (data.lyrics) {
+        setLyrics(data.lyrics);
+      }
+    } catch (err) {
+      console.error('Lyrics generation error:', err);
+      alert('Lyrics generation failed. Make sure a lyrics model is downloaded in Settings.');
+    } finally {
+      setIsGeneratingLyrics(false);
+    }
+  };
+
+  const handleAutoFillAll = async () => {
+    if (!token) return;
+    const desc = songDescription || style || '';
+    if (!desc.trim()) {
+      alert('Please enter a song description or style first.');
+      return;
+    }
+    setIsAutoFilling(true);
+    try {
+      const lyricsModel = localStorage.getItem('ace-lyricsModel') || '';
+      const res = await fetch('/api/lyrics/generate-full', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          description: desc,
+          modelId: lyricsModel || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Generation failed' }));
+        alert(err.error || 'Auto-fill failed');
+        return;
+      }
+      const data = await res.json();
+      if (data.style) setStyle(data.style);
+      if (data.lyrics) setLyrics(data.lyrics);
+      if (data.bpm && Number(data.bpm) > 0) setBpm(Number(data.bpm));
+      if (data.key) setKeyScale(data.key);
+      if (data.timeSignature) setTimeSignature(String(data.timeSignature));
+      if (data.language) setVocalLanguage(data.language);
+      if (data.instrumental !== undefined) setInstrumental(Boolean(data.instrumental));
+    } catch (err) {
+      console.error('Auto-fill error:', err);
+      alert('Auto-fill failed. Make sure a lyrics model is downloaded in Settings.');
+    } finally {
+      setIsAutoFilling(false);
     }
   };
 
@@ -973,6 +1050,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
       return trimmed ? `${trimmed}\n${genderHint}` : genderHint;
     })();
 
+    // Read settings from localStorage (managed by SettingsPage)
+    const lsAudioFormat = (localStorage.getItem('ace-audioFormat') || 'mp3') as 'mp3' | 'flac';
+    const lsInferMethod = (localStorage.getItem('ace-inferMethod') || 'ode') as 'ode' | 'sde';
+    const lsLmBackend = (localStorage.getItem('ace-lmBackend') || 'pt') as 'pt' | 'vllm';
+    const lsLmModel = localStorage.getItem('ace-lmModel') || 'acestep-5Hz-lm-0.6B';
+    const lsLmTemperature = Number(localStorage.getItem('ace-lmTemperature') ?? '0.95');
+    const lsLmCfgScale = Number(localStorage.getItem('ace-lmCfgScale') ?? '1.0');
+    const lsLmTopK = Number(localStorage.getItem('ace-lmTopK') ?? '60');
+    const lsLmTopP = Number(localStorage.getItem('ace-lmTopP') ?? '0.95');
+    const lsLmNegativePrompt = localStorage.getItem('ace-lmNegativePrompt') || '';
+
     // Bulk generation: loop bulkCount times
     for (let i = 0; i < bulkCount; i++) {
       // Seed handling: first job uses user's seed, rest get random seeds
@@ -1005,16 +1093,16 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         seed: jobSeed,
         thinking,
         enhance,
-        audioFormat,
-        inferMethod,
-        lmBackend,
-        lmModel,
+        audioFormat: lsAudioFormat,
+        inferMethod: lsInferMethod,
+        lmBackend: lsLmBackend,
+        lmModel: lsLmModel,
         shift,
-        lmTemperature,
-        lmCfgScale,
-        lmTopK,
-        lmTopP,
-        lmNegativePrompt,
+        lmTemperature: lsLmTemperature,
+        lmCfgScale: lsLmCfgScale,
+        lmTopK: lsLmTopK,
+        lmTopP: lsLmTopP,
+        lmNegativePrompt: lsLmNegativePrompt,
         referenceAudioUrl: referenceAudioUrl.trim() || undefined,
         sourceAudioUrl: sourceAudioUrl.trim() || undefined,
         referenceAudioTitle: referenceAudioTitle.trim() || undefined,
@@ -1144,64 +1232,15 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
               </button>
             </div>
 
-            {/* Model Selection */}
-            <div className="relative" ref={modelMenuRef}>
-              <button
-                onClick={() => setShowModelMenu(!showModelMenu)}
-                className="bg-zinc-200 dark:bg-black/40 border border-zinc-300 dark:border-white/5 rounded-md px-2 py-1 text-[11px] font-medium text-zinc-900 dark:text-white hover:bg-zinc-300 dark:hover:bg-black/50 transition-colors flex items-center gap-1"
-                disabled={availableModels.length === 0}
-              >
-                {availableModels.length === 0 ? '...' : getModelDisplayName(selectedModel)}
-                <ChevronDown size={10} className="text-zinc-600 dark:text-zinc-400" />
-              </button>
-              
-              {/* Floating Model Menu */}
-              {showModelMenu && availableModels.length > 0 && (
-                <div className="absolute top-full right-0 mt-1 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-                  <div className="max-h-96 overflow-y-auto custom-scrollbar">
-                    {availableModels.map(model => (
-                      <button
-                        key={model.id}
-                        onClick={() => {
-                          setSelectedModel(model.id);
-                          localStorage.setItem('ace-model', model.id);
-                          // Auto-adjust parameters for non-turbo models
-                          if (!isTurboModel(model.id)) {
-                            setInferenceSteps(20);
-                            setUseAdg(true);
-                          }
-                          setShowModelMenu(false);
-                        }}
-                        className={`w-full px-4 py-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors border-b border-zinc-100 dark:border-zinc-800 last:border-b-0 ${
-                          selectedModel === model.id ? 'bg-zinc-50 dark:bg-zinc-800/50' : ''
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-zinc-900 dark:text-white">
-                              {getModelDisplayName(model.id)}
-                            </span>
-                            {fetchedModels.find(m => m.name === model.id)?.is_preloaded && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                                {fetchedModels.find(m => m.name === model.id)?.is_active ? '● Active' : '● Ready'}
-                              </span>
-                            )}
-                          </div>
-                          {selectedModel === model.id && (
-                            <div className="w-4 h-4 rounded-full bg-pink-500 flex items-center justify-center">
-                              <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                              </svg>
-                            </div>
-                          )}
-                        </div>
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">{model.id}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            {/* Model Label — click to go to Settings */}
+            <button
+              onClick={() => onNavigateToSettings?.()}
+              className="bg-zinc-200 dark:bg-black/40 border border-zinc-300 dark:border-white/5 rounded-md px-2 py-1 text-[11px] font-medium text-zinc-900 dark:text-white hover:bg-zinc-300 dark:hover:bg-black/50 transition-colors flex items-center gap-1"
+              title="Change model in Settings"
+            >
+              {getModelDisplayName(selectedModel)}
+              <Settings2 size={10} className="text-zinc-600 dark:text-zinc-400" />
+            </button>
           </div>
         </div>
 
@@ -1237,11 +1276,27 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                 value={songDescription}
                 onChange={(e) => setSongDescription(e.target.value)}
                 placeholder={t('songDescriptionPlaceholder')}
-                className="w-full h-32 bg-transparent p-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none"
+                className="w-full h-36 bg-transparent p-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none"
               />
+              {/* Generate Lyrics button inside description card */}
+              <div className="px-3 pb-3">
+                <button
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border ${
+                    isGeneratingLyrics
+                      ? 'bg-violet-500 text-white border-violet-500'
+                      : 'bg-violet-50 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/20 text-violet-600 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-500/20 disabled:opacity-40 disabled:cursor-not-allowed'
+                  }`}
+                  title="Generate lyrics from your description using the local LLM"
+                  onClick={handleGenerateLyrics}
+                  disabled={isGeneratingLyrics || instrumental || !songDescription.trim()}
+                >
+                  {isGeneratingLyrics ? <Loader2 size={14} className="animate-spin" /> : <Music2 size={14} />}
+                  <span>{isGeneratingLyrics ? 'Writing lyrics...' : 'Generate Lyrics'}</span>
+                </button>
+              </div>
             </div>
 
-            {/* Vocal Language (Simple) */}
+            {/* Vocal Language & Gender (Simple) */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide px-1">
@@ -1279,47 +1334,222 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+        )}
 
-            {/* Quick Settings (Simple Mode) */}
-            <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-4 space-y-4">
+        {/* CUSTOM MODE */}
+        {customMode && (
+          <div className="space-y-5">
+            {/* Style Input - FIRST */}
+            <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 overflow-hidden transition-colors group focus-within:border-zinc-400 dark:focus-within:border-white/20">
+              <div className="flex items-center justify-between px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{t('styleOfMusic')}</span>
+                    <button
+                      onClick={() => setEnhance(!enhance)}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${enhance ? 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'}`}
+                      title={t('enhanceTooltip')}
+                    >
+                      <Sparkles size={9} />
+                      <span>{enhance ? 'ON' : 'OFF'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">{t('genreMoodInstruments')}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    className="p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors text-zinc-500 hover:text-black dark:hover:text-white"
+                    title={t('refreshGenres')}
+                    onClick={refreshMusicTags}
+                  >
+                    <Dices size={14} />
+                  </button>
+                  <button
+                    className="p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded text-zinc-500 hover:text-black dark:hover:text-white transition-colors"
+                    onClick={() => setStyle('')}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                  <button
+                    className={`p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors ${isFormattingStyle ? 'text-pink-500' : 'text-zinc-500 hover:text-black dark:hover:text-white'}`}
+                    title="AI Format - Enhance style & auto-fill parameters"
+                    onClick={() => handleFormat('style')}
+                    disabled={isFormattingStyle || !style.trim()}
+                  >
+                    {isFormattingStyle ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={style}
+                onChange={(e) => setStyle(e.target.value)}
+                placeholder={t('stylePlaceholder')}
+                className="w-full h-20 bg-transparent p-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none"
+              />
+              <div className="px-3 pb-3 space-y-3">
+                {/* Quick Tags */}
+                <div className="flex flex-wrap gap-2">
+                  {musicTags.map(tag => (
+                    <button
+                      key={tag}
+                      onClick={() => setStyle(prev => prev ? `${prev}, ${tag}` : tag)}
+                      className="text-[10px] font-medium bg-zinc-100 dark:bg-white/5 hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white px-2.5 py-1 rounded-full transition-colors border border-zinc-200 dark:border-white/5"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Lyrics Input - SECOND */}
+            <div
+              ref={lyricsRef}
+              className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 overflow-hidden transition-colors group focus-within:border-zinc-400 dark:focus-within:border-white/20 relative flex flex-col"
+              style={{ height: 'auto' }}
+            >
+              <div className="flex items-center justify-between px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 flex-shrink-0">
+                <div>
+                  <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{t('lyrics')}</span>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">{t('leaveLyricsEmpty')}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setInstrumental(!instrumental)}
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors ${
+                      instrumental
+                        ? 'bg-pink-600 text-white border-pink-500'
+                        : 'bg-white dark:bg-suno-card border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10'
+                    }`}
+                  >
+                    {instrumental ? t('instrumental') : t('vocal')}
+                  </button>
+                  <button
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1 ${
+                      isGeneratingLyrics
+                        ? 'bg-violet-500 text-white'
+                        : 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400 hover:bg-violet-200 dark:hover:bg-violet-500/30'
+                    }`}
+                    title="Generate lyrics with local LLM"
+                    onClick={handleGenerateLyrics}
+                    disabled={isGeneratingLyrics || instrumental}
+                  >
+                    {isGeneratingLyrics ? <Loader2 size={10} className="animate-spin" /> : <Music2 size={10} />}
+                    <span>{isGeneratingLyrics ? 'Writing...' : 'Write'}</span>
+                  </button>
+                  <button
+                    className={`p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors ${isFormattingLyrics ? 'text-pink-500' : 'text-zinc-500 hover:text-black dark:hover:text-white'}`}
+                    title="AI Format - Enhance style & auto-fill parameters"
+                    onClick={() => handleFormat('lyrics')}
+                    disabled={isFormattingLyrics || !style.trim()}
+                  >
+                    {isFormattingLyrics ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  </button>
+                  <button
+                    className="p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded text-zinc-500 hover:text-black dark:hover:text-white transition-colors"
+                    onClick={() => setLyrics('')}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+              <textarea
+                disabled={instrumental}
+                value={lyrics}
+                onChange={(e) => setLyrics(e.target.value)}
+                placeholder={instrumental ? t('instrumental') + ' mode' : t('lyricsPlaceholder')}
+                className={`w-full bg-transparent p-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none font-mono leading-relaxed ${instrumental ? 'opacity-30 cursor-not-allowed' : ''}`}
+                style={{ height: `${lyricsHeight}px` }}
+              />
+              {/* Resize Handle */}
+              <div
+                onMouseDown={startResizing}
+                className="h-3 w-full cursor-ns-resize flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors absolute bottom-0 left-0 z-10"
+              >
+                <div className="w-8 h-1 rounded-full bg-zinc-300 dark:bg-zinc-700"></div>
+              </div>
+            </div>
+
+            {/* Auto-fill All (Lyrics LLM) - THIRD */}
+            <button
+              onClick={handleAutoFillAll}
+              disabled={isAutoFilling || (!songDescription.trim() && !style.trim())}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all border ${
+                isAutoFilling
+                  ? 'bg-violet-500 text-white border-violet-500'
+                  : 'bg-violet-50 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/20 text-violet-600 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-500/20 disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+              title="Use local LLM to generate style, lyrics, BPM, key, and more from your description"
+            >
+              {isAutoFilling ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              <span>{isAutoFilling ? 'Generating everything...' : 'Auto-fill All (Lyrics LLM)'}</span>
+            </button>
+
+            {/* Vocal Language & Gender - FOURTH */}
+            {!instrumental && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide px-1">
+                    {t('vocalLanguage')}
+                  </label>
+                  <select
+                    value={vocalLanguage}
+                    onChange={(e) => setVocalLanguage(e.target.value)}
+                    className="w-full bg-white dark:bg-suno-card border border-zinc-200 dark:border-white/5 rounded-xl px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
+                  >
+                    {VOCAL_LANGUAGE_KEYS.map(lang => (
+                      <option key={lang.value} value={lang.value}>{t(lang.key)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide px-1">
+                    {t('vocalGender')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setVocalGender(vocalGender === 'male' ? '' : 'male')}
+                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${vocalGender === 'male' ? 'bg-pink-600 text-white border-pink-600' : 'border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-white/20'}`}
+                    >
+                      {t('male')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVocalGender(vocalGender === 'female' ? '' : 'female')}
+                      className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${vocalGender === 'female' ? 'bg-pink-600 text-white border-pink-600' : 'border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-white/20'}`}
+                    >
+                      {t('female')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Music Parameters - FIFTH */}
+            <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-4 space-y-3">
               <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide flex items-center gap-2">
                 <Sliders size={14} />
-                {t('quickSettings')}
+                {t('musicParameters')}
               </h3>
-
-              {/* Duration */}
-              <EditableSlider
-                label={t('duration')}
-                value={duration}
-                min={-1}
-                max={activeMaxDuration}
-                step={5}
-                onChange={setDuration}
-                formatDisplay={(val) => val === -1 ? t('auto') : `${val}${t('seconds')}`}
-                title={''}
-                autoLabel={t('auto')}
-              />
-
-              {/* BPM */}
-              <EditableSlider
-                label="BPM"
-                value={bpm}
-                min={0}
-                max={300}
-                step={5}
-                onChange={setBpm}
-                formatDisplay={(val) => val === 0 ? 'Auto' : val.toString()}
-                autoLabel="Auto"
-              />
-
-              {/* Key & Time Signature */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">BPM</label>
+                  <input
+                    type="number"
+                    value={bpm}
+                    onChange={(e) => setBpm(Number(e.target.value))}
+                    placeholder="Auto"
+                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500"
+                  />
+                </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('key')}</label>
                   <select
                     value={keyScale}
-                    onChange={setKeyScale}
-                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
+                    onChange={(e) => setKeyScale(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
                   >
                     <option value="">Auto</option>
                     {KEY_SIGNATURES.filter(k => k).map(key => (
@@ -1331,8 +1561,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                   <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('time')}</label>
                   <select
                     value={timeSignature}
-                    onChange={setTimeSignature}
-                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
+                    onChange={(e) => setTimeSignature(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
                   >
                     <option value="">Auto</option>
                     {TIME_SIGNATURES.filter(t => t).map(time => (
@@ -1341,36 +1571,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                   </select>
                 </div>
               </div>
-
-              {/* Variations */}
-              <EditableSlider
-                label={t('variations')}
-                value={batchSize}
-                min={1}
-                max={4}
-                step={1}
-                onChange={setBatchSize}
-              />
-              <div style={{display: 'none'}}>
-                <input
-                  type="range"
-                  min="1"
-                  max="4"
-                  step="1"
-                  value={batchSize}
-                  onChange={setBatchSize}
-                  className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-pink-500"
-                />
-                <p className="text-[10px] text-zinc-500">{t('numberOfVariations')}</p>
-              </div>
             </div>
-          </div>
-        )}
 
-        {/* CUSTOM MODE */}
-        {customMode && (
-          <div className="space-y-5">
-            {/* Audio Section */}
+            {/* Reference Audio / Cover - SIXTH */}
             <div
               onDrop={(e) => handleDrop(e, audioTab)}
               onDragOver={handleDragOver}
@@ -1544,124 +1747,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
               </div>
             </div>
 
-            {/* Lyrics Input */}
-            <div
-              ref={lyricsRef}
-              className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 overflow-hidden transition-colors group focus-within:border-zinc-400 dark:focus-within:border-white/20 relative flex flex-col"
-              style={{ height: 'auto' }}
-            >
-              <div className="flex items-center justify-between px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 flex-shrink-0">
-                <div>
-                  <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{t('lyrics')}</span>
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">{t('leaveLyricsEmpty')}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setInstrumental(!instrumental)}
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors ${
-                      instrumental
-                        ? 'bg-pink-600 text-white border-pink-500'
-                        : 'bg-white dark:bg-suno-card border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10'
-                    }`}
-                  >
-                    {instrumental ? t('instrumental') : t('vocal')}
-                  </button>
-                  <button
-                    className={`p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors ${isFormattingLyrics ? 'text-pink-500' : 'text-zinc-500 hover:text-black dark:hover:text-white'}`}
-                    title="AI Format - Enhance style & auto-fill parameters"
-                    onClick={() => handleFormat('lyrics')}
-                    disabled={isFormattingLyrics || !style.trim()}
-                  >
-                    {isFormattingLyrics ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                  </button>
-                  <button
-                    className="p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded text-zinc-500 hover:text-black dark:hover:text-white transition-colors"
-                    onClick={() => setLyrics('')}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-              <textarea
-                disabled={instrumental}
-                value={lyrics}
-                onChange={(e) => setLyrics(e.target.value)}
-                placeholder={instrumental ? t('instrumental') + ' mode' : t('lyricsPlaceholder')}
-                className={`w-full bg-transparent p-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none font-mono leading-relaxed ${instrumental ? 'opacity-30 cursor-not-allowed' : ''}`}
-                style={{ height: `${lyricsHeight}px` }}
-              />
-              {/* Resize Handle */}
-              <div
-                onMouseDown={startResizing}
-                className="h-3 w-full cursor-ns-resize flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors absolute bottom-0 left-0 z-10"
-              >
-                <div className="w-8 h-1 rounded-full bg-zinc-300 dark:bg-zinc-700"></div>
-              </div>
-            </div>
-
-            {/* Style Input */}
-            <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 overflow-hidden transition-colors group focus-within:border-zinc-400 dark:focus-within:border-white/20">
-              <div className="flex items-center justify-between px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{t('styleOfMusic')}</span>
-                    <button
-                      onClick={() => setEnhance(!enhance)}
-                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all cursor-pointer ${enhance ? 'bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400' : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'}`}
-                      title={t('enhanceTooltip')}
-                    >
-                      <Sparkles size={9} />
-                      <span>{enhance ? 'ON' : 'OFF'}</span>
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">{t('genreMoodInstruments')}</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    className="p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors text-zinc-500 hover:text-black dark:hover:text-white"
-                    title={t('refreshGenres')}
-                    onClick={refreshMusicTags}
-                  >
-                    <Dices size={14} />
-                  </button>
-                  <button
-                    className="p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded text-zinc-500 hover:text-black dark:hover:text-white transition-colors"
-                    onClick={() => setStyle('')}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                  <button
-                    className={`p-1.5 hover:bg-zinc-200 dark:hover:bg-white/10 rounded transition-colors ${isFormattingStyle ? 'text-pink-500' : 'text-zinc-500 hover:text-black dark:hover:text-white'}`}
-                    title="AI Format - Enhance style & auto-fill parameters"
-                    onClick={() => handleFormat('style')}
-                    disabled={isFormattingStyle || !style.trim()}
-                  >
-                    {isFormattingStyle ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                  </button>
-                </div>
-              </div>
-              <textarea
-                value={style}
-                onChange={(e) => setStyle(e.target.value)}
-                placeholder={t('stylePlaceholder')}
-                className="w-full h-20 bg-transparent p-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none"
-              />
-              <div className="px-3 pb-3 space-y-3">
-                {/* Quick Tags */}
-                <div className="flex flex-wrap gap-2">
-                  {musicTags.map(tag => (
-                    <button
-                      key={tag}
-                      onClick={() => setStyle(prev => prev ? `${prev}, ${tag}` : tag)}
-                      className="text-[10px] font-medium bg-zinc-100 dark:bg-white/5 hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-600 dark:text-zinc-400 hover:text-black dark:hover:text-white px-2.5 py-1 rounded-full transition-colors border border-zinc-200 dark:border-white/5"
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
             {/* Title Input */}
             <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 overflow-hidden">
               <div className="px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 border-b border-zinc-100 dark:border-white/5 bg-zinc-50 dark:bg-white/5">
@@ -1696,46 +1781,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
             </div>
           )}
 
-          {/* Vocal Language (Custom mode) */}
-          {customMode && !instrumental && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide px-1">
-                  {t('vocalLanguage')}
-                </label>
-                <select
-                  value={vocalLanguage}
-                  onChange={(e) => setVocalLanguage(e.target.value)}
-                  className="w-full bg-white dark:bg-suno-card border border-zinc-200 dark:border-white/5 rounded-xl px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
-                >
-                  {VOCAL_LANGUAGE_KEYS.map(lang => (
-                    <option key={lang.value} value={lang.value}>{t(lang.key)}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide px-1">
-                  {t('vocalGender')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setVocalGender(vocalGender === 'male' ? '' : 'male')}
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${vocalGender === 'male' ? 'bg-pink-600 text-white border-pink-600' : 'border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-white/20'}`}
-                  >
-                    {t('male')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVocalGender(vocalGender === 'female' ? '' : 'female')}
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${vocalGender === 'female' ? 'bg-pink-600 text-white border-pink-600' : 'border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-white/20'}`}
-                  >
-                    {t('female')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* LORA CONTROL PANEL */}
@@ -1830,56 +1875,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
           </>
         )}
 
-        {/* MUSIC PARAMETERS */}
-        <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-4 space-y-4">
-          <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide flex items-center gap-2">
-            <Sliders size={14} />
-            {t('musicParameters')}
-          </h3>
-
-          {/* BPM */}
-          <EditableSlider
-            label={t('bpm')}
-            value={bpm}
-            min={0}
-            max={300}
-            step={5}
-            onChange={setBpm}
-            formatDisplay={(val) => val === 0 ? t('auto') : val.toString()}
-            autoLabel={t('auto')}
-          />
-
-          {/* Key & Time Signature */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Key</label>
-              <select
-                value={keyScale}
-                onChange={(e) => setKeyScale(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
-              >
-                <option value="">Auto</option>
-                {KEY_SIGNATURES.filter(k => k).map(key => (
-                  <option key={key} value={key}>{key}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Time</label>
-              <select
-                value={timeSignature}
-                onChange={(e) => setTimeSignature(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
-              >
-                <option value="">Auto</option>
-                {TIME_SIGNATURES.filter(t => t).map(time => (
-                  <option key={time} value={time}>{time}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-
         {/* ADVANCED SETTINGS */}
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}
@@ -1919,177 +1914,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
               helpText={`${t('auto')} - 10 ${t('min')}`}
             />
 
-            {/* Batch Size */}
-            <EditableSlider
-              label={t('batchSize')}
-              value={batchSize}
-              min={1}
-              max={4}
-              step={1}
-              onChange={setBatchSize}
-              helpText={t('numberOfVariations')}
-              title="Creates multiple variations in a single run. More variations = longer total time."
-            />
-
-            {/* Bulk Generate */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('bulkGenerate')}</label>
-                <span className="text-xs font-mono text-zinc-900 dark:text-white bg-zinc-100 dark:bg-black/20 px-2 py-0.5 rounded">
-                  {bulkCount} {t(bulkCount === 1 ? 'job' : 'jobs')}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                {[1, 2, 3, 5, 10].map((count) => (
-                  <button
-                    key={count}
-                    onClick={() => { setBulkCount(count); localStorage.setItem('ace-bulkCount', String(count)); }}
-                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${
-                      bulkCount === count
-                        ? 'bg-gradient-to-r from-orange-500 to-pink-600 text-white shadow-md'
-                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-                    }`}
-                  >
-                    {count}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-zinc-500">{t('queueMultipleJobs')}</p>
-            </div>
-
-            {/* Inference Steps */}
-            <EditableSlider
-              label={t('inferenceSteps')}
-              value={inferenceSteps}
-              min={1}
-              max={isTurboModel(selectedModel) ? 20 : 200}
-              step={1}
-              onChange={setInferenceSteps}
-              helpText={t('moreStepsBetterQuality')}
-              title="More steps usually improves quality but slows generation."
-            />
-
-            {/* Guidance Scale */}
-            <EditableSlider
-              label={t('guidanceScale')}
-              value={guidanceScale}
-              min={1}
-              max={15}
-              step={0.1}
-              onChange={setGuidanceScale}
-              formatDisplay={(val) => val.toFixed(1)}
-              helpText={t('howCloselyFollowPrompt')}
-              title="How strongly the model follows the prompt. Higher = stricter, lower = freer."
-            />
-
-            {/* Audio Format & Inference Method */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('audioFormat')}</label>
-                <select
-                  value={audioFormat}
-                  onChange={(e) => setAudioFormat(e.target.value as 'mp3' | 'flac')}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
-                >
-                  <option value="mp3">{t('mp3Smaller')}</option>
-                  <option value="flac">{t('flacLossless')}</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Deterministic is more repeatable; stochastic adds randomness.">{t('inferMethod')}</label>
-                <select
-                  value={inferMethod}
-                  onChange={(e) => setInferMethod(e.target.value as 'ode' | 'sde')}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
-                >
-                  <option value="ode">{t('odeDeterministic')}</option>
-                  <option value="sde">{t('sdeStochastic')}</option>
-                </select>
-              </div>
-            </div>
-
-            {/* LM Backend */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('lmBackendLabel')}</label>
-              <select
-                value={lmBackend}
-                onChange={(e) => setLmBackend(e.target.value as 'pt' | 'vllm')}
-                className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none"
-              >
-                <option value="pt">{t('lmBackendPt')}</option>
-                <option value="vllm">{t('lmBackendVllm')}</option>
-              </select>
-              <p className="text-[10px] text-zinc-500">{t('lmBackendHint')}</p>
-            </div>
-
-            {/* LM Model */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('lmModelLabel')}</label>
-              <select
-                value={lmModel}
-                onChange={(e) => { const v = e.target.value; setLmModel(v); localStorage.setItem('ace-lmModel', v); }}
-                className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none"
-              >
-                <option value="acestep-5Hz-lm-0.6B">{t('lmModel06B')}</option>
-                <option value="acestep-5Hz-lm-1.7B">{t('lmModel17B')}</option>
-                <option value="acestep-5Hz-lm-4B">{t('lmModel4B')}</option>
-              </select>
-              <p className="text-[10px] text-zinc-500">{t('lmModelHint')}</p>
-            </div>
-
-            {/* Seed */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Dices size={14} className="text-zinc-500" />
-                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Fixing the seed makes results repeatable. Random is recommended for variety.">{t('seed')}</span>
-                </div>
-                <button
-                  onClick={() => setRandomSeed(!randomSeed)}
-                  className={`w-10 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 border border-zinc-200 dark:border-white/5 ${randomSeed ? 'bg-pink-600' : 'bg-zinc-300 dark:bg-black/40'}`}
-                >
-                  <div className={`w-4 h-4 rounded-full bg-white transform transition-transform duration-200 shadow-sm ${randomSeed ? 'translate-x-5' : 'translate-x-0'}`} />
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <Hash size={14} className="text-zinc-500" />
-                <input
-                  type="number"
-                  value={seed}
-                  onChange={(e) => setSeed(Number(e.target.value))}
-                  placeholder={t('enterFixedSeed')}
-                  disabled={randomSeed}
-                  className={`flex-1 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none ${randomSeed ? 'opacity-40 cursor-not-allowed' : ''}`}
-                />
-              </div>
-              <p className="text-[10px] text-zinc-500">{randomSeed ? t('randomSeedRecommended') : t('fixedSeedReproducible')}</p>
-            </div>
-
-            {/* Thinking Toggle */}
-            <div className="flex items-center justify-between py-2 border-t border-zinc-100 dark:border-white/5">
-              <span className={`text-xs font-medium ${loraLoaded ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-600 dark:text-zinc-400'}`} title="Lets the lyric model reason about structure and metadata. Slightly slower.">{t('thinkingCot')}</span>
-              <button
-                onClick={() => !loraLoaded && setThinking(!thinking)}
-                disabled={loraLoaded}
-                className={`w-10 h-5 rounded-full flex items-center transition-colors duration-200 px-0.5 border border-zinc-200 dark:border-white/5 ${thinking ? 'bg-pink-600' : 'bg-zinc-300 dark:bg-black/40'} ${loraLoaded ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <div className={`w-4 h-4 rounded-full bg-white transform transition-transform duration-200 shadow-sm ${thinking ? 'translate-x-5' : 'translate-x-0'}`} />
-              </button>
-            </div>
-
-            {/* Shift */}
-            <EditableSlider
-              label={t('shift')}
-              value={shift}
-              min={1}
-              max={5}
-              step={0.1}
-              onChange={setShift}
-              formatDisplay={(val) => val.toFixed(1)}
-              helpText={t('timestepShiftForBase')}
-              title="Adjusts the diffusion schedule. Only affects base model."
-            />
-
             {/* Divider */}
             <div className="border-t border-zinc-200 dark:border-white/10 pt-4">
               <p className="text-[10px] text-zinc-500 uppercase tracking-wide font-bold mb-3">{t('expertControls')}</p>
@@ -2097,86 +1921,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
 
             {uploadError && (
               <div className="text-[11px] text-rose-500">{uploadError}</div>
-            )}
-
-            {/* LM Parameters */}
-            <button
-              onClick={() => setShowLmParams(!showLmParams)}
-              className="w-full flex items-center justify-between px-4 py-3 bg-white/60 dark:bg-black/20 rounded-xl border border-zinc-200/70 dark:border-white/10 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/5 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Music2 size={16} className="text-zinc-500" />
-                <div className="flex flex-col items-start">
-                  <span title="Controls the 5Hz lyric/caption model sampling behavior.">{t('lmParameters')}</span>
-                  <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-normal">{t('controlLyricGeneration')}</span>
-                </div>
-              </div>
-              <ChevronDown size={16} className={`text-zinc-500 transition-transform ${showLmParams ? 'rotate-180' : ''}`} />
-            </button>
-
-            {showLmParams && (
-              <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-4 space-y-4">
-                {/* LM Temperature */}
-                <EditableSlider
-                  label={t('lmTemperature')}
-                  value={lmTemperature}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  onChange={setLmTemperature}
-                  formatDisplay={(val) => val.toFixed(2)}
-                  helpText={t('higherMoreRandom')}
-                  title="Higher temperature = more random word choices."
-                />
-
-                {/* LM CFG Scale */}
-                <EditableSlider
-                  label={t('lmCfgScale')}
-                  value={lmCfgScale}
-                  min={1}
-                  max={3}
-                  step={0.1}
-                  onChange={setLmCfgScale}
-                  formatDisplay={(val) => val.toFixed(1)}
-                  helpText={t('noCfgScale')}
-                  title="How strongly the lyric model follows the prompt."
-                />
-
-                {/* LM Top-K & Top-P */}
-                <div className="grid grid-cols-2 gap-3">
-                  <EditableSlider
-                    label={t('topK')}
-                    value={lmTopK}
-                    min={0}
-                    max={100}
-                    step={1}
-                    onChange={setLmTopK}
-                    title="Restricts choices to the K most likely tokens. 0 disables."
-                  />
-                  <EditableSlider
-                    label={t('topP')}
-                    value={lmTopP}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    onChange={setLmTopP}
-                    formatDisplay={(val) => val.toFixed(2)}
-                    title="Samples from the smallest set whose total probability is P."
-                  />
-                </div>
-
-                {/* LM Negative Prompt */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Words or ideas to steer the lyric model away from.">{t('lmNegativePrompt')}</label>
-                  <textarea
-                    value={lmNegativePrompt}
-                    onChange={(e) => setLmNegativePrompt(e.target.value)}
-                    placeholder={t('thingsToAvoid')}
-                    className="w-full h-16 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg p-2 text-xs text-zinc-900 dark:text-white focus:outline-none resize-none"
-                  />
-                  <p className="text-[10px] text-zinc-500">{t('useWhenCfgScaleGreater')}</p>
-                </div>
-              </div>
             )}
 
             <div className="space-y-1">
@@ -2194,28 +1938,63 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    // Convert source audio to LM codes — requires Gradio lambda (not exposed as API)
-                    // This is a placeholder: Gradio's convert_src_audio_to_codes_wrapper is not a named endpoint
-                    console.log('Convert to Codes: requires source audio upload. Use Gradio UI for this feature.');
+                  onClick={async () => {
+                    if (!sourceAudioUrl || extractingCodes) return;
+                    setExtractingCodes(true);
+                    setUploadError(null);
+                    try {
+                      const res = await fetch('/api/generate/extract-codes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ audioUrl: sourceAudioUrl }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || 'Extract codes failed');
+                      if (data.codes) setAudioCodes(data.codes);
+                    } catch (err: any) {
+                      setUploadError(err.message || 'Failed to extract codes');
+                    } finally {
+                      setExtractingCodes(false);
+                    }
                   }}
-                  disabled={!sourceAudioUrl}
+                  disabled={!sourceAudioUrl || extractingCodes}
                   title="Convert source audio to LM codes (requires source audio)"
                   className="px-2 py-1 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  Convert to Codes
+                  {extractingCodes ? 'Extracting...' : 'Convert to Codes'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    // Transcribe audio codes to metadata — requires Gradio lambda (not exposed as API)
-                    console.log('Transcribe: requires audio codes. Use Gradio UI for this feature.');
+                  onClick={async () => {
+                    if (!sourceAudioUrl || transcribing) return;
+                    setTranscribing(true);
+                    setUploadError(null);
+                    try {
+                      const res = await fetch('/api/generate/full-analysis', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ audioUrl: sourceAudioUrl }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || 'Full analysis failed');
+                      if (data.codes) setAudioCodes(data.codes);
+                      if (data.bpm && data.bpm > 0) setBpm(data.bpm);
+                      if (data.key) setKeyScale(data.key);
+                      if (data.timeSignature) setTimeSignature(data.timeSignature);
+                      if (data.duration && data.duration > 0) setDuration(data.duration);
+                      if (data.prompt) setStyle(data.prompt);
+                      if (data.lyrics) setLyrics(data.lyrics);
+                    } catch (err: any) {
+                      setUploadError(err.message || 'Failed to transcribe');
+                    } finally {
+                      setTranscribing(false);
+                    }
                   }}
-                  disabled={!audioCodes.trim()}
-                  title="Transcribe audio codes to metadata (requires audio codes)"
+                  disabled={!sourceAudioUrl || transcribing}
+                  title="Analyze source audio to extract metadata (BPM, key, genre, lyrics, etc.)"
                   className="px-2 py-1 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  Transcribe
+                  {transcribing ? 'Analyzing...' : 'Transcribe'}
                 </button>
               </div>
             </div>

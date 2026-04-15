@@ -25,6 +25,7 @@ import contactRoutes from './routes/contact.js';
 import referenceTrackRoutes from './routes/referenceTrack.js';
 import loraRoutes from './routes/lora.js';
 import trainingRoutes from './routes/training.js';
+import lyricsRoutes from './routes/lyrics.js';
 import { pool } from './db/pool.js';
 import './db/migrate.js';
 
@@ -40,12 +41,15 @@ app.use(helmet({
       baseUri: ["'self'"],
       fontSrc: ["'self'", 'https:', 'data:'],
       formAction: ["'self'"],
-      frameAncestors: ["'self'"],
-      imgSrc: ["'self'", 'data:', 'https:'],
+      frameAncestors: ["'self'", '*'],
+      imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
       objectSrc: ["'none'"],
-      scriptSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://cdn.tailwindcss.com'],
       scriptSrcAttr: ["'none'"],
       styleSrc: ["'self'", 'https:', "'unsafe-inline'"],
+      connectSrc: ["'self'", 'https:', 'http:', 'ws:', 'wss:'],
+      mediaSrc: ["'self'", 'blob:', 'data:', 'https:'],
+      workerSrc: ["'self'", 'blob:'],
       upgradeInsecureRequests: [],
     },
   },
@@ -53,26 +57,7 @@ app.use(helmet({
 
 // Middleware
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, etc.)
-    if (!origin) return callback(null, true);
-    // Allow localhost and 127.0.0.1 on any port in development
-    if (config.nodeEnv === 'development') {
-      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-        return callback(null, true);
-      }
-      // Allow LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-      const lanPattern = /^https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
-      if (lanPattern.test(origin)) {
-        return callback(null, true);
-      }
-    }
-    // Allow configured frontend URL
-    if (origin === config.frontendUrl) {
-      return callback(null, true);
-    }
-    callback(new Error('Not allowed by CORS'));
-  },
+  origin: true,
   credentials: true,
 }));
 
@@ -407,6 +392,17 @@ app.use('/api/contact', contactRoutes);
 app.use('/api/reference-tracks', referenceTrackRoutes);
 app.use('/api/lora', loraRoutes);
 app.use('/api/training', trainingRoutes);
+app.use('/api/lyrics', lyricsRoutes);
+
+// Serve frontend static files
+const distPath = path.join(__dirname, '../../dist');
+app.use(express.static(distPath));
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/audio/') || req.path.startsWith('/editor/') || req.path.startsWith('/demucs-web/')) {
+    return next();
+  }
+  res.sendFile(path.join(distPath, 'index.html'));
+});
 
 // Error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
