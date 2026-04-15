@@ -58,9 +58,11 @@ RUN cd /app/ACE-Step-1.5 && \
     echo "# Gradio imports disabled" > acestep/ui/gradio/events/generation/__init__.py && \
     echo "# Gradio imports disabled" > acestep/ui/gradio/interfaces/__init__.py
 
-# Patch: remove chunk_size/batch_size from auto-label (not supported by label_all_samples)
+# Patch: remove unsupported kwargs from auto-label routes
+# label_all_samples() only accepts: dit_handler, llm_handler, format_lyrics,
+# transcribe_lyrics, skip_metas, only_unlabeled, progress_callback
 RUN cd /app/ACE-Step-1.5 && \
-    sed -i '/chunk_size=request.chunk_size,/d; /batch_size=request.batch_size,/d' \
+    sed -i '/chunk_size=request.chunk_size,/d; /batch_size=request.batch_size,/d; /sample_labeled_callback=/d' \
     acestep/api/train_api_dataset_auto_label_async_route.py \
     acestep/api/train_api_dataset_auto_label_sync_route.py 2>/dev/null || true
 
