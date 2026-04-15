@@ -58,6 +58,9 @@ RUN pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/rele
 RUN pip install -e /app/ACE-Step-1.5/acestep/third_parts/nano-vllm && \
     pip install --no-deps -e /app/ACE-Step-1.5
 
+# Pin torchcodec to 0.10.0 (0.11+ needs PyTorch > 2.10)
+RUN pip install torchcodec==0.10.0
+
 # Patch: decouple api_server from Gradio imports
 RUN cd /app/ACE-Step-1.5 && \
     sed -i 's|from acestep.ui.gradio.events.results_handlers import _build_generation_info|from acestep.ui.gradio.events.results.generation_info import _build_generation_info|' acestep/api_server.py && \
