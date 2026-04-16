@@ -681,13 +681,13 @@ export const TrainingPanel: React.FC = () => {
   return (
     <div className="h-full w-full flex flex-col bg-zinc-50 dark:bg-suno-panel overflow-hidden">
       {/* Header */}
-      <div className="px-4 pt-4 pb-2 flex-shrink-0">
-        <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('loraTraining')}</h2>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Train a LoRA adapter step by step</p>
+      <div className="px-3 pt-3 pb-1.5 flex-shrink-0">
+        <h2 className="text-base font-bold text-zinc-900 dark:text-white">{t('loraTraining')}</h2>
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">Train a LoRA adapter step by step</p>
       </div>
 
       {/* Stepper */}
-      <div className="flex items-center gap-0 px-4 pb-3 flex-shrink-0">
+      <div className="flex items-center gap-0 px-3 pb-2 flex-shrink-0">
         {PIPELINE_STEPS.map((step, i) => {
           const Icon = step.icon;
           const done = completedSteps.has(step.key);
@@ -701,7 +701,7 @@ export const TrainingPanel: React.FC = () => {
               <button
                 onClick={() => goToStep(step.key)}
                 disabled={!canClick}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all flex-shrink-0 ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all flex-shrink-0 ${
                   isCurrent
                     ? 'bg-pink-500/20 text-pink-400 border border-pink-500/30'
                     : done
@@ -721,7 +721,7 @@ export const TrainingPanel: React.FC = () => {
       </div>
 
       {/* Step Content */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 scrollbar-hide">
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2 scrollbar-hide">
 
         {/* ===== STEP 1: UPLOAD ===== */}
         {activeStep === 'upload' && (
@@ -730,10 +730,10 @@ export const TrainingPanel: React.FC = () => {
               <div
                 onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
                 onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${isDragOver ? 'border-pink-500 bg-pink-500/10' : 'border-white/10 hover:border-white/20 hover:bg-white/[0.02]'}`}
+                className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${isDragOver ? 'border-pink-500 bg-pink-500/10' : 'border-white/10 hover:border-white/20 hover:bg-white/[0.02]'}`}
               >
-                <Upload size={28} className={`mx-auto mb-2 ${isDragOver ? 'text-pink-400' : 'text-zinc-500'}`} />
-                <p className="text-sm text-zinc-300 font-medium">Drop audio files here or click to browse</p>
+                <Upload size={24} className={`mx-auto mb-1.5 ${isDragOver ? 'text-pink-400' : 'text-zinc-500'}`} />
+                <p className="text-xs text-zinc-300 font-medium">Drop audio files here or click to browse</p>
                 <p className="text-[11px] text-zinc-600 mt-1">.wav, .mp3, .flac, .ogg, .opus</p>
                 <input ref={fileInputRef} type="file" multiple accept=".wav,.mp3,.flac,.ogg,.opus" onChange={handleFileSelect} className="hidden" />
               </div>
@@ -753,9 +753,9 @@ export const TrainingPanel: React.FC = () => {
                 </div>
                 <div className="mt-3 space-y-2">
                   <FieldRow label="Dataset Name">
-                    <input type="text" value={uploadDatasetName} onChange={e => setUploadDatasetName(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="my_lora_dataset" />
+                    <input type="text" value={uploadDatasetName} onChange={e => setUploadDatasetName(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="my_lora_dataset" />
                   </FieldRow>
-                  <button onClick={handleUploadAndBuild} disabled={uploading || !uploadDatasetName.trim()} className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50">
+                  <button onClick={handleUploadAndBuild} disabled={uploading || !uploadDatasetName.trim()} className="w-full py-2 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2 disabled:opacity-50">
                     {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                     Upload & Build Dataset ({queuedFiles.length} files)
                   </button>
@@ -772,7 +772,7 @@ export const TrainingPanel: React.FC = () => {
             {/* Or load existing */}
             <Section title="Or Load Existing Dataset">
               <div className="flex gap-2">
-                <input type="text" value={datasetPath} onChange={e => setDatasetPath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="./datasets/my_dataset.json" />
+                <input type="text" value={datasetPath} onChange={e => setDatasetPath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="./datasets/my_dataset.json" />
                 <button onClick={handleLoadDataset} disabled={datasetLoading} className="px-3 py-1.5 bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-50">
                   {datasetLoading ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
                   Load
@@ -869,27 +869,27 @@ export const TrainingPanel: React.FC = () => {
 
                 <div className="space-y-2">
                   <FieldRow label="Caption">
-                    <input type="text" value={editCaption} onChange={e => setEditCaption(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                    <input type="text" value={editCaption} onChange={e => setEditCaption(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                   </FieldRow>
                   <FieldRow label="Genre">
-                    <input type="text" value={editGenre} onChange={e => setEditGenre(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                    <input type="text" value={editGenre} onChange={e => setEditGenre(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                   </FieldRow>
                   <div>
                     <label className="text-[11px] text-zinc-500 mb-0.5 block">Lyrics</label>
-                    <textarea value={editLyrics} onChange={e => setEditLyrics(e.target.value)} rows={3} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50 resize-none" />
+                    <textarea value={editLyrics} onChange={e => setEditLyrics(e.target.value)} rows={3} className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50 resize-none" />
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="text-[11px] text-zinc-500 mb-0.5 block">BPM</label>
-                      <input type="number" value={editBpm} onChange={e => setEditBpm(parseInt(e.target.value) || 0)} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                      <input type="number" value={editBpm} onChange={e => setEditBpm(parseInt(e.target.value) || 0)} className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                     </div>
                     <div>
                       <label className="text-[11px] text-zinc-500 mb-0.5 block">Key</label>
-                      <input type="text" value={editKey} onChange={e => setEditKey(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                      <input type="text" value={editKey} onChange={e => setEditKey(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                     </div>
                     <div>
                       <label className="text-[11px] text-zinc-500 mb-0.5 block">Language</label>
-                      <select value={editLanguage} onChange={e => setEditLanguage(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50">
+                      <select value={editLanguage} onChange={e => setEditLanguage(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50">
                         {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                       </select>
                     </div>
@@ -906,9 +906,9 @@ export const TrainingPanel: React.FC = () => {
             {/* Save Dataset & Advance */}
             <Section title="Save Dataset">
               <FieldRow label="Save Path">
-                <input type="text" value={savePath} onChange={e => setSavePath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                <input type="text" value={savePath} onChange={e => setSavePath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
               </FieldRow>
-              <button onClick={handleSaveDataset} disabled={saving} className="w-full mt-2 py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
+              <button onClick={handleSaveDataset} disabled={saving} className="w-full mt-2 py-2 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 Save Dataset & Continue
               </button>
@@ -927,10 +927,10 @@ export const TrainingPanel: React.FC = () => {
                   <span className="text-xs text-zinc-300 truncate">{savePath || datasetPath}</span>
                 </FieldRow>
                 <FieldRow label="Output Dir">
-                  <input type="text" value={preprocessOutputDir} onChange={e => setPreprocessOutputDir(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                  <input type="text" value={preprocessOutputDir} onChange={e => setPreprocessOutputDir(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                 </FieldRow>
               </div>
-              <button onClick={handlePreprocess} disabled={preprocessing} className="w-full mt-3 py-2.5 bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-600 hover:to-violet-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
+              <button onClick={handlePreprocess} disabled={preprocessing} className="w-full mt-3 py-2 bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-600 hover:to-violet-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
                 {preprocessing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
                 {preprocessing ? 'Preprocessing...' : 'Start Preprocessing'}
               </button>
@@ -949,7 +949,7 @@ export const TrainingPanel: React.FC = () => {
             {/* Load Tensors */}
             <Section title="Preprocessed Dataset">
               <div className="flex gap-2">
-                <input type="text" value={trainingParams.tensorDir} onChange={e => setTrainingParams(p => ({ ...p, tensorDir: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                <input type="text" value={trainingParams.tensorDir} onChange={e => setTrainingParams(p => ({ ...p, tensorDir: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                 <button onClick={handleLoadTensors} className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded-lg text-xs font-medium flex items-center gap-1.5">
                   <FolderOpen size={14} />
                   Load
@@ -971,17 +971,17 @@ export const TrainingPanel: React.FC = () => {
             <Section title="Training Parameters">
               <div className="space-y-2">
                 <FieldRow label="Learning Rate">
-                  <input type="number" value={trainingParams.learningRate} onChange={e => setTrainingParams(p => ({ ...p, learningRate: parseFloat(e.target.value) || 0.0003 }))} step={0.0001} className="w-28 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                  <input type="number" value={trainingParams.learningRate} onChange={e => setTrainingParams(p => ({ ...p, learningRate: parseFloat(e.target.value) || 0.0003 }))} step={0.0001} className="w-28 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                 </FieldRow>
                 <ParamSlider label="Max Epochs" value={trainingParams.epochs} min={1} max={4000} step={1} onChange={v => setTrainingParams(p => ({ ...p, epochs: v }))} />
                 <ParamSlider label="Batch Size" value={trainingParams.batchSize} min={1} max={8} step={1} onChange={v => setTrainingParams(p => ({ ...p, batchSize: v }))} />
                 <ParamSlider label="Gradient Accumulation" value={trainingParams.gradientAccumulation} min={1} max={16} step={1} onChange={v => setTrainingParams(p => ({ ...p, gradientAccumulation: v }))} />
                 <ParamSlider label="Save Every (epochs)" value={trainingParams.saveEvery} min={50} max={1000} step={50} onChange={v => setTrainingParams(p => ({ ...p, saveEvery: v }))} />
                 <FieldRow label="Output Dir">
-                  <input type="text" value={trainingParams.outputDir} onChange={e => setTrainingParams(p => ({ ...p, outputDir: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                  <input type="text" value={trainingParams.outputDir} onChange={e => setTrainingParams(p => ({ ...p, outputDir: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                 </FieldRow>
                 <FieldRow label="Resume">
-                  <input type="text" value={trainingParams.resumeCheckpoint} onChange={e => setTrainingParams(p => ({ ...p, resumeCheckpoint: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="./lora_output/checkpoints/epoch_200" />
+                  <input type="text" value={trainingParams.resumeCheckpoint} onChange={e => setTrainingParams(p => ({ ...p, resumeCheckpoint: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="./lora_output/checkpoints/epoch_200" />
                 </FieldRow>
               </div>
             </Section>
@@ -989,12 +989,12 @@ export const TrainingPanel: React.FC = () => {
             {/* Training Controls */}
             <div className="flex gap-2">
               {!isTraining ? (
-                <button onClick={handleStartTraining} className="flex-1 py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2">
+                <button onClick={handleStartTraining} className="flex-1 py-2 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2">
                   <Play size={16} />
                   Start Training
                 </button>
               ) : (
-                <button onClick={handleStopTraining} className="flex-1 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-sm font-medium flex items-center justify-center gap-2">
+                <button onClick={handleStopTraining} className="flex-1 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-xs font-medium flex items-center justify-center gap-2">
                   <Square size={16} />
                   Stop Training
                 </button>
@@ -1027,13 +1027,13 @@ export const TrainingPanel: React.FC = () => {
               <p className="text-[11px] text-zinc-500 mb-3">Export your trained LoRA adapter for use in generation.</p>
               <div className="space-y-2">
                 <FieldRow label="Export Path">
-                  <input type="text" value={exportPath} onChange={e => setExportPath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                  <input type="text" value={exportPath} onChange={e => setExportPath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                 </FieldRow>
                 <FieldRow label="LoRA Output Dir">
-                  <input type="text" value={exportOutputDir} onChange={e => setExportOutputDir(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                  <input type="text" value={exportOutputDir} onChange={e => setExportOutputDir(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
                 </FieldRow>
               </div>
-              <button onClick={handleExportLora} disabled={exporting} className="w-full mt-3 py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50">
+              <button onClick={handleExportLora} disabled={exporting} className="w-full mt-3 py-2 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2 disabled:opacity-50">
                 {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                 Export LoRA
               </button>
@@ -1062,8 +1062,8 @@ export const TrainingPanel: React.FC = () => {
 // Reusable Section component
 const Section: React.FC<{ title: string | React.ReactNode; children: React.ReactNode }> = ({ title, children }) => (
   <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
-    <div className="px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
-      <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{title}</h3>
+    <div className="px-3 py-2 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
+      <h3 className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{title}</h3>
     </div>
     <div className="p-3">{children}</div>
   </div>

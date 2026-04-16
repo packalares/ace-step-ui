@@ -21,7 +21,7 @@ import { PlaylistDetail } from './components/PlaylistDetail';
 import { Toast, ToastType } from './components/Toast';
 import { SearchPage } from './components/SearchPage';
 import { TrainingPanel } from './components/TrainingPanel';
-import { NewsPage } from './components/NewsPage';
+// NewsPage removed
 import { SettingsPage } from './components/SettingsPage';
 import { ConfirmDialog } from './components/ConfirmDialog';
 
@@ -287,8 +287,6 @@ function AppContent() {
         }
       } else if (path === '/search') {
         setCurrentView('search');
-      } else if (path === '/news') {
-        setCurrentView('news');
       } else if (path === '/settings') {
         setCurrentView('settings');
       }
@@ -1299,9 +1297,6 @@ function AppContent() {
       case 'training':
         return <TrainingPanel />;
 
-      case 'news':
-        return <NewsPage />;
-
       case 'settings':
         return (
           <SettingsPage
@@ -1415,8 +1410,6 @@ function AppContent() {
               window.history.pushState({}, '', '/library');
             } else if (v === 'search') {
               window.history.pushState({}, '', '/search');
-            } else if (v === 'news') {
-              window.history.pushState({}, '', '/news');
             } else if (v === 'settings') {
               window.history.pushState({}, '', '/settings');
             }

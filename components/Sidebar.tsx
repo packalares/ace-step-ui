@@ -1,5 +1,5 @@
 import React from 'react';
-import { Library, Disc, Search, LogIn, LogOut, Sun, Moon, GraduationCap, Newspaper, Settings2 } from 'lucide-react';
+import { Library, Disc, Search, LogIn, LogOut, Sun, Moon, GraduationCap, Settings2 } from 'lucide-react';
 import { View } from '../types';
 import { useI18n } from '../context/I18nContext';
 
@@ -44,10 +44,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className={`
         flex flex-col h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 flex-shrink-0 py-4 overflow-y-auto scrollbar-hide transition-all duration-300
         fixed left-0 top-0 z-50 md:relative
-        ${isOpen ? 'w-[200px]' : 'w-[72px]'}
+        ${isOpen ? 'w-[220px]' : 'w-[72px]'}
       `}>
       {/* Logo & Brand */}
-      <div className="px-3 mb-8 flex items-center justify-between">
+      <div className="px-3 mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div
             className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-500 to-purple-600 flex items-center justify-center cursor-pointer shadow-lg hover:scale-105 transition-transform flex-shrink-0"
@@ -82,7 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      <nav className="flex-1 flex flex-col gap-2 w-full px-3">
+      <nav className="flex-1 flex flex-col gap-1 w-full px-3">
         <NavItem
           icon={<Disc size={20} />}
           label={t('create')}
@@ -112,13 +112,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           isExpanded={isOpen}
         />
         <NavItem
-          icon={<Newspaper size={20} />}
-          label={t('news')}
-          active={currentView === 'news'}
-          onClick={() => onNavigate('news')}
-          isExpanded={isOpen}
-        />
-        <NavItem
           icon={<Settings2 size={20} />}
           label="Settings"
           active={currentView === 'settings'}
@@ -126,13 +119,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           isExpanded={isOpen}
         />
 
-        <div className="mt-auto flex flex-col gap-2">
+        <div className="mt-auto flex flex-col gap-1">
           {/* Theme Toggle */}
           <button
             onClick={onToggleTheme}
             className={`
               w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5
-              ${isOpen ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+              ${isOpen ? 'px-3 py-2 justify-start' : 'aspect-square justify-center'}
             `}
             title={theme === 'dark' ? t('lightMode') : t('darkMode')}
           >
@@ -151,7 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={onOpenSettings}
                 className={`
                   w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-zinc-500 dark:text-zinc-400 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5
-                  ${isOpen ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+                  ${isOpen ? 'px-3 py-2 justify-start' : 'aspect-square justify-center'}
                 `}
                 title={`${user.username} - ${t('settings')}`}
               >
@@ -173,7 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={onLogout}
                 className={`
                   w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-zinc-500 hover:text-red-500 hover:bg-red-500/10
-                  ${isOpen ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+                  ${isOpen ? 'px-3 py-2 justify-start' : 'aspect-square justify-center'}
                 `}
                 title={t('signOut')}
               >
@@ -188,7 +181,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={onLogin}
               className={`
                 w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-zinc-500 dark:text-zinc-400 hover:text-pink-500 hover:bg-zinc-100 dark:hover:bg-white/5
-                ${isOpen ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+                ${isOpen ? 'px-3 py-2 justify-start' : 'aspect-square justify-center'}
               `}
               title={t('signIn')}
             >
@@ -218,7 +211,7 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, isExpan
     onClick={onClick}
     className={`
       w-full rounded-xl flex items-center gap-3 transition-all duration-200 group relative overflow-hidden
-      ${isExpanded ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+      ${isExpanded ? 'px-3 py-2 justify-start' : 'aspect-square justify-center'}
       ${active ? 'bg-zinc-100 dark:bg-white/10 text-black dark:text-white' : 'text-zinc-500 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5'}
     `}
     title={label}

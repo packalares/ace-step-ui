@@ -102,15 +102,15 @@ export const Player: React.FC<PlayerProps> = ({
     // Show minimal player when no song is playing
     if (!currentSong) {
         return (
-            <div className="h-20 lg:h-24 bg-white dark:bg-black/95 backdrop-blur border-t border-zinc-200 dark:border-white/10 flex items-center justify-center z-50 transition-colors duration-300 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] dark:shadow-none">
+            <div className="h-16 lg:h-18 bg-white/80 dark:bg-zinc-900/90 backdrop-blur-xl border-t border-zinc-200 dark:border-white/5 flex items-center justify-center z-50 transition-colors duration-300">
                 <button
                     onClick={() => onPlayFirst?.()}
-                    className="flex items-center gap-3 text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400 cursor-pointer transition-colors"
+                    className="flex items-center gap-2 text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400 cursor-pointer transition-colors"
                 >
-                    <div className="w-10 h-10 lg:w-12 lg:h-12 rounded bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center">
-                        <Play size={20} />
+                    <div className="w-9 h-9 lg:w-10 lg:h-10 rounded bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center">
+                        <Play size={18} />
                     </div>
-                    <span className="text-sm font-medium">{t('selectSongToPlay')}</span>
+                    <span className="text-xs font-medium">{t('selectSongToPlay')}</span>
                 </button>
             </div>
         );
@@ -577,32 +577,32 @@ export const Player: React.FC<PlayerProps> = ({
                             </div>
 
                             {/* Extra Actions */}
-                            <div className="flex items-center justify-center gap-4 text-zinc-400 dark:text-white/50">
+                            <div className="flex items-center justify-center gap-2 text-zinc-400 dark:text-white/50">
                                 <button
                                     onClick={onToggleLike}
-                                    className={`p-3 rounded-full hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors ${isLiked ? 'text-pink-600 dark:text-pink-500' : ''}`}
+                                    className={`p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors ${isLiked ? 'text-pink-600 dark:text-pink-500' : ''}`}
                                 >
-                                    <Heart size={22} fill={isLiked ? "currentColor" : "none"} />
+                                    <Heart size={18} fill={isLiked ? "currentColor" : "none"} />
                                 </button>
                                 {onOpenVideo && (
                                     <button
                                         onClick={onOpenVideo}
-                                        className="p-3 rounded-full hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
+                                        className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
                                     >
-                                        <Maximize2 size={20} />
+                                        <Maximize2 size={18} />
                                     </button>
                                 )}
                                 <button
                                     onClick={handleDownload}
-                                    className="p-3 rounded-full hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
+                                    className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
                                     title={t('downloadAudio')}
                                 >
-                                    <Download size={20} />
+                                    <Download size={18} />
                                 </button>
                                 <div className="relative">
                                     <button
                                         onClick={() => setShowDropdown(!showDropdown)}
-                                        className="p-3 rounded-full hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
+                                        className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
                                     >
                                         <MoreVertical size={20} />
                                     </button>
@@ -637,12 +637,12 @@ export const Player: React.FC<PlayerProps> = ({
     }
 
     return (
-        <div className="h-20 lg:h-24 bg-white dark:bg-black/95 backdrop-blur border-t border-zinc-200 dark:border-white/10 flex flex-col z-50 transition-colors duration-300 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] dark:shadow-none">
+        <div className="h-16 lg:h-18 bg-white/80 dark:bg-zinc-900/90 backdrop-blur-xl border-t border-zinc-200 dark:border-white/5 flex flex-col z-50 transition-colors duration-300">
 
             {/* Progress Bar */}
             <div
                 ref={progressBarRef}
-                className="w-full h-1 lg:h-1.5 bg-zinc-200 dark:bg-zinc-800 cursor-pointer group relative"
+                className="w-full h-0.5 lg:h-1 bg-zinc-200 dark:bg-zinc-800 cursor-pointer group relative"
                 onClick={(e) => handleSeekInteraction(e, progressBarRef)}
             >
                 <div
@@ -655,11 +655,11 @@ export const Player: React.FC<PlayerProps> = ({
                 <div className="absolute top-1/2 -translate-y-1/2 w-full h-4 -z-10"></div>
             </div>
 
-            <div className="flex-1 flex items-center justify-between px-2 sm:px-4 lg:px-6 gap-2 sm:gap-4">
+            <div className="flex-1 flex items-center justify-between px-2 sm:px-3 lg:px-4 gap-2 sm:gap-3">
 
                 {/* Song Info */}
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 max-w-[30%] lg:max-w-[33%]">
-                    <div className="w-10 h-10 lg:w-12 lg:h-12 rounded bg-zinc-200 dark:bg-zinc-800 overflow-hidden shadow-sm flex-shrink-0">
+                <div className="flex items-center gap-2 min-w-0 flex-1 max-w-[30%] lg:max-w-[33%]">
+                    <div className="w-9 h-9 lg:w-10 lg:h-10 rounded bg-zinc-200 dark:bg-zinc-800 overflow-hidden shadow-sm flex-shrink-0">
                         {currentSong.coverUrl ? (
                             <img src={currentSong.coverUrl} className="w-full h-full object-cover" alt="cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                         ) : null}
@@ -668,23 +668,23 @@ export const Player: React.FC<PlayerProps> = ({
                     <div className="overflow-hidden min-w-0">
                         <h4
                             onClick={() => onNavigateToSong?.(currentSong.id)}
-                            className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-white truncate cursor-pointer hover:underline"
+                            className="text-xs font-bold text-zinc-900 dark:text-white truncate cursor-pointer hover:underline"
                         >
                             {currentSong.title}
                         </h4>
-                        <p className="text-[10px] sm:text-xs text-zinc-500 dark:text-zinc-400 truncate hover:underline cursor-pointer">{currentSong.creator || 'Unknown Artist'}</p>
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate hover:underline cursor-pointer">{currentSong.creator || 'Unknown Artist'}</p>
                     </div>
                     <button
                         onClick={onToggleLike}
-                        className={`ml-1 sm:ml-2 transition-colors flex-shrink-0 hidden sm:block ${isLiked ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
+                        className={`ml-1 transition-colors flex-shrink-0 hidden sm:block ${isLiked ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
                     >
-                        <Heart size={18} fill={isLiked ? "currentColor" : "none"} />
+                        <Heart size={16} fill={isLiked ? "currentColor" : "none"} />
                     </button>
                 </div>
 
                 {/* Controls */}
                 <div className="flex flex-col items-center justify-center flex-shrink-0">
-                    <div className="flex items-center gap-2 sm:gap-4 lg:gap-6">
+                    <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
                         <button
                             onClick={onToggleShuffle}
                             className={`transition-colors hidden sm:block ${isShuffle ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}

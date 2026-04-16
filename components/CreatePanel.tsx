@@ -267,6 +267,16 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
   const [loraError, setLoraError] = useState<string | null>(null);
   const [isLoraLoading, setIsLoraLoading] = useState(false);
 
+  // Check LoRA status on mount
+  useEffect(() => {
+    if (!token) return;
+    generateApi.getLoraStatus(token).then((status: any) => {
+      if (status?.loaded || status?.lora_loaded || status?.active) {
+        setLoraLoaded(true);
+      }
+    }).catch(() => {});
+  }, [token]);
+
   // Model selection
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     return localStorage.getItem('ace-model') || 'acestep-v15-turbo-shift3';
@@ -301,6 +311,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const dragDepthRef = useRef(0);
+  const [showAudioAnalysis, setShowAudioAnalysis] = useState(false);
+  const [showTrackSelection, setShowTrackSelection] = useState(false);
+  const [showExpertTuning, setShowExpertTuning] = useState(false);
   const [showAudioModal, setShowAudioModal] = useState(false);
   const [audioModalTarget, setAudioModalTarget] = useState<'reference' | 'source'>('reference');
   const [tempAudioUrl, setTempAudioUrl] = useState('');
@@ -406,9 +419,21 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
       if (loraLoaded) {
         await handleLoraUnload();
       } else {
-        const result = await generateApi.loadLora({ lora_path: loraPath }, token);
-        setLoraLoaded(true);
-        console.log('LoRA loaded:', result?.message);
+        try {
+          const result = await generateApi.loadLora({ lora_path: loraPath }, token);
+          setLoraLoaded(true);
+          console.log('LoRA loaded:', result?.message);
+        } catch (loadErr: any) {
+          // If adapter already in use, unload first then retry
+          if (loadErr?.message?.includes('already in use')) {
+            await handleLoraUnload();
+            const result = await generateApi.loadLora({ lora_path: loraPath }, token);
+            setLoraLoaded(true);
+            console.log('LoRA reloaded after unload:', result?.message);
+          } else {
+            throw loadErr;
+          }
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'LoRA operation failed';
@@ -1198,7 +1223,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
     if (!token || !songDescription.trim()) return;
 
     if (simpleMetadataReady) {
-      // Metadata already prepared via dice button — generate immediately
+      // Metadata prepared via dice button — use it
       fireSimpleGenerate({
         caption: songDescription,
         lyrics: hiddenLyrics,
@@ -1209,29 +1234,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         vocal_language: hiddenVocalLanguage,
       });
     } else {
-      // No metadata yet — call /api/generate/simple first, then generate
-      setSimpleGenerating(true);
-      try {
-        const result = await generateApi.simpleGenerate({
-          description: songDescription,
-          instrumental,
-        }, token);
-
-        fireSimpleGenerate({
-          caption: result.caption || songDescription,
-          lyrics: result.lyrics || '',
-          bpm: result.bpm || undefined,
-          key: result.key || '',
-          timeSignature: result.timeSignature || '',
-          duration: result.duration || undefined,
-          vocal_language: result.vocal_language || 'unknown',
-        });
-      } catch (err) {
-        console.error('Simple generate error:', err);
-        alert('Failed to prepare song. Please try again or switch to Custom mode.');
-      } finally {
-        setSimpleGenerating(false);
-      }
+      // No dice used — just send the description directly, ACE-Step handles it
+      fireSimpleGenerate({
+        caption: songDescription,
+        lyrics: instrumental ? '[Instrumental]' : '',
+        vocal_language: 'unknown',
+      });
     }
   };
 
@@ -1559,12 +1567,39 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                 </div>
               </div>
               <textarea
+                data-lyrics="true"
                 value={lyrics}
                 onChange={(e) => setLyrics(e.target.value)}
                 placeholder="Leave empty for instrumental"
                 className="w-full bg-transparent p-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none font-mono leading-relaxed"
                 style={{ height: `${lyricsHeight}px` }}
               />
+              {/* Tag inserter */}
+              <div className="px-3 pb-2 flex flex-wrap gap-1">
+                {['[Intro]','[Verse]','[Pre-Chorus]','[Chorus]','[Bridge]','[Outro]','[Hook]','[Instrumental Break]','[Solo]','[Interlude]'].map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => {
+                      const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-lyrics]');
+                      if (ta) {
+                        const start = ta.selectionStart;
+                        const end = ta.selectionEnd;
+                        const before = lyrics.slice(0, start);
+                        const after = lyrics.slice(end);
+                        const insert = (before && !before.endsWith('\n') ? '\n' : '') + tag + '\n';
+                        setLyrics(before + insert + after);
+                        setTimeout(() => { ta.selectionStart = ta.selectionEnd = start + insert.length; ta.focus(); }, 0);
+                      } else {
+                        setLyrics(prev => prev + (prev && !prev.endsWith('\n') ? '\n' : '') + tag + '\n');
+                      }
+                    }}
+                    className="text-[9px] font-mono font-medium px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/5 hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white border border-zinc-200 dark:border-white/5 transition-colors"
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
               {/* Resize Handle */}
               <div
                 onMouseDown={startResizing}
@@ -1709,6 +1744,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                     </button>
                   </div>
                 </div>
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1.5">
+                  {audioTab === 'reference'
+                    ? 'Style inspiration \u2014 the AI listens to this track and generates music with a similar feel, without copying the melody'
+                    : 'Source for covers \u2014 the AI recreates this track in your chosen style. Also used for audio-to-audio and repaint modes'}
+                </p>
               </div>
 
               {/* Audio Content */}
@@ -1991,19 +2031,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
 
         {showAdvanced && (
           <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5 p-4 space-y-4">
-            {/* Load Parameters from JSON */}
-            <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-zinc-300 dark:border-white/15 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-white/5 cursor-pointer transition-colors">
-              <Upload size={14} />
-              Load Parameters (JSON)
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleLoadParamsFile}
-                className="hidden"
-              />
-            </label>
 
-            {/* Duration */}
+            {/* ── Group 1: Generation (always visible) ── */}
             <EditableSlider
               label={t('duration')}
               value={duration}
@@ -2016,107 +2045,29 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
               helpText={`${t('auto')} - 10 ${t('min')}`}
             />
 
-            {/* Divider */}
-            <div className="border-t border-zinc-200 dark:border-white/10 pt-4">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wide font-bold mb-3">{t('expertControls')}</p>
-            </div>
-
-            {uploadError && (
-              <div className="text-[11px] text-rose-500">{uploadError}</div>
-            )}
-
-            <div className="space-y-1">
-              <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide" title="Controls how much the output follows the input audio.">{t('transform')}</h4>
-              <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{t('controlSourceAudio')}</p>
-            </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Advanced: precomputed audio codes for conditioning.">{t('audioCodes')}</label>
-              <textarea
-                value={audioCodes}
-                onChange={(e) => setAudioCodes(e.target.value)}
-                placeholder={t('optionalAudioCodes')}
-                className="w-full h-16 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg p-2 text-xs text-zinc-900 dark:text-white focus:outline-none resize-none"
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!sourceAudioUrl || extractingCodes) return;
-                    setExtractingCodes(true);
-                    setUploadError(null);
-                    try {
-                      const res = await fetch('/api/generate/extract-codes', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                        body: JSON.stringify({ audioUrl: sourceAudioUrl }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok) throw new Error(data.error || 'Extract codes failed');
-                      if (data.codes) setAudioCodes(data.codes);
-                    } catch (err: any) {
-                      setUploadError(err.message || 'Failed to extract codes');
-                    } finally {
-                      setExtractingCodes(false);
-                    }
-                  }}
-                  disabled={!sourceAudioUrl || extractingCodes}
-                  title="Convert source audio to LM codes (requires source audio)"
-                  className="px-2 py-1 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {extractingCodes ? 'Extracting...' : 'Convert to Codes'}
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!sourceAudioUrl || transcribing) return;
-                    setTranscribing(true);
-                    setUploadError(null);
-                    try {
-                      const res = await fetch('/api/generate/full-analysis', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                        body: JSON.stringify({ audioUrl: sourceAudioUrl }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok) throw new Error(data.error || 'Full analysis failed');
-                      if (data.codes) setAudioCodes(data.codes);
-                      if (data.bpm && data.bpm > 0) setBpm(data.bpm);
-                      if (data.key) setKeyScale(data.key);
-                      if (data.timeSignature) setTimeSignature(data.timeSignature);
-                      if (data.duration && data.duration > 0) setDuration(data.duration);
-                      if (data.prompt) setStyle(data.prompt);
-                      if (data.lyrics) setLyrics(data.lyrics);
-                    } catch (err: any) {
-                      setUploadError(err.message || 'Failed to transcribe');
-                    } finally {
-                      setTranscribing(false);
-                    }
-                  }}
-                  disabled={!sourceAudioUrl || transcribing}
-                  title="Analyze source audio to extract metadata (BPM, key, genre, lyrics, etc.)"
-                  className="px-2 py-1 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {transcribing ? 'Analyzing...' : 'Transcribe'}
-                </button>
-              </div>
+              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Task Type</label>
+              <select
+                value={taskType}
+                onChange={(e) => setTaskType(e.target.value)}
+                className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
+              >
+                <option value="text2music">Text to Music</option>
+                <option value="cover">Cover</option>
+                <option value="audio2audio">Audio to Audio</option>
+                <option value="repaint">Repaint</option>
+              </select>
+              <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                {taskType === 'text2music' && 'Generate music from your style description and lyrics'}
+                {taskType === 'cover' && 'Recreate the source audio in a new style. Upload source audio in the Cover tab above'}
+                {taskType === 'audio2audio' && 'Transform source audio based on your style changes. Upload source audio above'}
+                {taskType === 'repaint' && 'Modify a specific time range of the source audio'}
+              </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            {(taskType === 'cover' || taskType === 'audio2audio') && (
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Choose text-to-music or audio-based modes.">{t('taskType')}</label>
-                <select
-                  value={taskType}
-                  onChange={(e) => setTaskType(e.target.value)}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 transition-colors cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800 [&>option]:text-zinc-900 [&>option]:dark:text-white"
-                >
-                  <option value="text2music">{t('textToMusic')}</option>
-                  <option value="audio2audio">{t('audio2audio')}</option>
-                  <option value="cover">{t('coverTask')}</option>
-                  <option value="repaint">{t('repaintTask')}</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="How strongly the source audio shapes the result.">{t('audioCoverStrength')}</label>
+                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Source Influence</label>
                 <input
                   type="number"
                   step="0.01"
@@ -2126,195 +2077,351 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                   onChange={(e) => setAudioCoverStrength(Number(e.target.value))}
                   className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
                 />
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-500">How much the original audio shapes the result (0 = ignore, 1 = faithful)</p>
               </div>
-            </div>
+            )}
 
-            <div className="grid grid-cols-2 gap-3">
+            {taskType === 'repaint' && (
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Start time for the region to repaint (seconds).">{t('repaintingStart')}</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={repaintingStart}
-                  onChange={(e) => setRepaintingStart(Number(e.target.value))}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
-                />
+                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Time Range to Modify</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-zinc-400">Start (sec)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={repaintingStart}
+                      onChange={(e) => setRepaintingStart(Number(e.target.value))}
+                      className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-zinc-400">End (sec)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={repaintingEnd}
+                      onChange={(e) => setRepaintingEnd(Number(e.target.value))}
+                      className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="End time for the region to repaint (seconds).">{t('repaintingEnd')}</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={repaintingEnd}
-                  onChange={(e) => setRepaintingEnd(Number(e.target.value))}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
-                />
+            )}
+
+            {uploadError && (
+              <div className="text-[11px] text-rose-500">{uploadError}</div>
+            )}
+
+            {/* ── Group 2: Audio Analysis (collapsible) ── */}
+            <button
+              type="button"
+              onClick={() => setShowAudioAnalysis(!showAudioAnalysis)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-zinc-50 dark:bg-white/5 rounded-lg text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
+            >
+              <span>Audio Analysis — Extract codes and metadata from source audio</span>
+              <ChevronDown size={14} className={`transition-transform ${showAudioAnalysis ? 'rotate-180' : ''}`} />
+            </button>
+            {showAudioAnalysis && (
+              <div className="mt-2 space-y-3">
+                <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Extract a musical fingerprint from source audio for precise conditioning</p>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('audioCodes')}</label>
+                  <textarea
+                    value={audioCodes}
+                    onChange={(e) => setAudioCodes(e.target.value)}
+                    placeholder={t('optionalAudioCodes')}
+                    className="w-full h-16 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg p-2 text-xs text-zinc-900 dark:text-white focus:outline-none resize-none"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!sourceAudioUrl || extractingCodes) return;
+                        setExtractingCodes(true);
+                        setUploadError(null);
+                        try {
+                          const res = await fetch('/api/generate/extract-codes', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ audioUrl: sourceAudioUrl }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok) throw new Error(data.error || 'Extract codes failed');
+                          if (data.codes) setAudioCodes(data.codes);
+                        } catch (err: any) {
+                          setUploadError(err.message || 'Failed to extract codes');
+                        } finally {
+                          setExtractingCodes(false);
+                        }
+                      }}
+                      disabled={!sourceAudioUrl || extractingCodes}
+                      title="Convert source audio to LM codes (requires source audio)"
+                      className="px-2 py-1 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {extractingCodes ? 'Extracting...' : 'Convert to Codes'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!sourceAudioUrl || transcribing) return;
+                        setTranscribing(true);
+                        setUploadError(null);
+                        try {
+                          const res = await fetch('/api/generate/full-analysis', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ audioUrl: sourceAudioUrl }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok) throw new Error(data.error || 'Full analysis failed');
+                          if (data.codes) setAudioCodes(data.codes);
+                          if (data.bpm && data.bpm > 0) setBpm(data.bpm);
+                          if (data.key) setKeyScale(data.key);
+                          if (data.timeSignature) setTimeSignature(data.timeSignature);
+                          if (data.duration && data.duration > 0) setDuration(data.duration);
+                          if (data.prompt) setStyle(data.prompt);
+                          if (data.lyrics) setLyrics(data.lyrics);
+                        } catch (err: any) {
+                          setUploadError(err.message || 'Failed to transcribe');
+                        } finally {
+                          setTranscribing(false);
+                        }
+                      }}
+                      disabled={!sourceAudioUrl || transcribing}
+                      title="Analyze source audio to extract metadata (BPM, key, genre, lyrics, etc.)"
+                      className="px-2 py-1 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {transcribing ? 'Analyzing...' : 'Full Analysis'}
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Additional directives to guide generation.">{t('instruction')}</label>
-              <textarea
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-                className="w-full h-16 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg p-2 text-xs text-zinc-900 dark:text-white focus:outline-none resize-none"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{t('guidance')}</h4>
-              <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{t('advancedCfgScheduling')}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Fraction of the diffusion process to start applying guidance.">{t('cfgIntervalStart')}</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="1"
-                  value={cfgIntervalStart}
-                  onChange={(e) => setCfgIntervalStart(Number(e.target.value))}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
-                />
+            {/* ── Group 3: Track Selection (collapsible) ── */}
+            <button
+              type="button"
+              onClick={() => setShowTrackSelection(!showTrackSelection)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-zinc-50 dark:bg-white/5 rounded-lg text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
+            >
+              <span>Track Selection — Generate specific instruments</span>
+              <ChevronDown size={14} className={`transition-transform ${showTrackSelection ? 'rotate-180' : ''}`} />
+            </button>
+            {showTrackSelection && (
+              <div className="mt-2 space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('trackName')}</label>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Focus generation on a specific instrument type</p>
+                  <select
+                    value={trackName}
+                    onChange={(e) => setTrackName(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800"
+                  >
+                    <option value="">None</option>
+                    {TRACK_NAMES.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('completeTrackClasses')}</label>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Select which instruments to include in the output</p>
+                  <div className="flex flex-wrap gap-2">
+                    {TRACK_NAMES.map(name => {
+                      const selected = completeTrackClasses.split(',').map(s => s.trim()).filter(Boolean);
+                      const isChecked = selected.includes(name);
+                      return (
+                        <label key={name} className="flex items-center gap-1 text-[10px] font-medium text-zinc-500 dark:text-zinc-400 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              const next = isChecked
+                                ? selected.filter(s => s !== name)
+                                : [...selected, name];
+                              setCompleteTrackClasses(next.join(','));
+                            }}
+                            className="accent-pink-600"
+                          />
+                          {name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Fraction of the diffusion process to stop applying guidance.">{t('cfgIntervalEnd')}</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="1"
-                  value={cfgIntervalEnd}
-                  onChange={(e) => setCfgIntervalEnd(Number(e.target.value))}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
-                />
-              </div>
-            </div>
+            )}
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Override the default timestep schedule (advanced).">{t('customTimesteps')}</label>
-              <input
-                type="text"
-                value={customTimesteps}
-                onChange={(e) => setCustomTimesteps(e.target.value)}
-                placeholder={t('timestepsPlaceholder')}
-                className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
-              />
-            </div>
+            {/* ── Group 4: Expert Tuning (collapsible) ── */}
+            <button
+              type="button"
+              onClick={() => setShowExpertTuning(!showExpertTuning)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-zinc-50 dark:bg-white/5 rounded-lg text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors"
+            >
+              <span>Expert Tuning — Fine-tune the generation process</span>
+              <ChevronDown size={14} className={`transition-transform ${showExpertTuning ? 'rotate-180' : ''}`} />
+            </button>
+            {showExpertTuning && (
+              <div className="mt-2 space-y-3">
+                {/* Instruction */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Instruction</label>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Additional directives for the AI</p>
+                  <textarea
+                    value={instruction}
+                    onChange={(e) => setInstruction(e.target.value)}
+                    className="w-full h-16 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg p-2 text-xs text-zinc-900 dark:text-white focus:outline-none resize-none"
+                  />
+                </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Scales score-based guidance (advanced).">{t('scoreScale')}</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  max="1"
-                  value={scoreScale}
-                  onChange={(e) => setScoreScale(Number(e.target.value))}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Bigger chunks can be faster but use more memory.">{t('lmBatchChunkSize')}</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="32"
-                  step="1"
-                  value={lmBatchChunkSize}
-                  onChange={(e) => setLmBatchChunkSize(Number(e.target.value))}
-                  className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('trackName')}</label>
-              <select
-                value={trackName}
-                onChange={(e) => setTrackName(e.target.value)}
-                className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-none cursor-pointer [&>option]:bg-white [&>option]:dark:bg-zinc-800"
-              >
-                <option value="">None</option>
-                {TRACK_NAMES.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('completeTrackClasses')}</label>
-              <div className="flex flex-wrap gap-2">
-                {TRACK_NAMES.map(name => {
-                  const selected = completeTrackClasses.split(',').map(s => s.trim()).filter(Boolean);
-                  const isChecked = selected.includes(name);
-                  return (
-                    <label key={name} className="flex items-center gap-1 text-[10px] font-medium text-zinc-500 dark:text-zinc-400 cursor-pointer">
+                {/* Guidance */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">CFG Interval</label>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Control when guidance is applied during diffusion (0=start, 1=end)</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-400">Start</label>
                       <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => {
-                          const next = isChecked
-                            ? selected.filter(s => s !== name)
-                            : [...selected, name];
-                          setCompleteTrackClasses(next.join(','));
-                        }}
-                        className="accent-pink-600"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        value={cfgIntervalStart}
+                        onChange={(e) => setCfgIntervalStart(Number(e.target.value))}
+                        className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
                       />
-                      {name}
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-zinc-400">End</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        value={cfgIntervalEnd}
+                        onChange={(e) => setCfgIntervalEnd(Number(e.target.value))}
+                        className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <label
-                className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400"
-                title="Adaptive Dual Guidance: dynamically adjusts CFG for quality. Base model only; slower."
-              >
-                <input type="checkbox" checked={useAdg} onChange={() => setUseAdg(!useAdg)} />
-                {t('useAdg')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Allow the LM to run in larger batches for speed (more VRAM).">
-                <input type="checkbox" checked={allowLmBatch} onChange={() => setAllowLmBatch(!allowLmBatch)} />
-                {t('allowLmBatch')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Let the LM reason about metadata like BPM, key, duration.">
-                <input type="checkbox" checked={useCotMetas} onChange={() => setUseCotMetas(!useCotMetas)} />
-                {t('useCotMetas')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Let the LM reason about the caption/style text.">
-                <input type="checkbox" checked={useCotCaption} onChange={() => setUseCotCaption(!useCotCaption)} />
-                {t('useCotCaption')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Let the LM reason about language selection.">
-                <input type="checkbox" checked={useCotLanguage} onChange={() => setUseCotLanguage(!useCotLanguage)} />
-                {t('useCotLanguage')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Auto-generate missing fields when possible.">
-                <input type="checkbox" checked={autogen} onChange={() => setAutogen(!autogen)} />
-                {t('autogen')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Include debug info for constrained decoding.">
-                <input type="checkbox" checked={constrainedDecodingDebug} onChange={() => setConstrainedDecodingDebug(!constrainedDecodingDebug)} />
-                {t('constrainedDecodingDebug')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Use the formatted caption produced by the AI formatter.">
-                <input type="checkbox" checked={isFormatCaption} onChange={() => setIsFormatCaption(!isFormatCaption)} />
-                {t('formatCaption')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Return scorer outputs for diagnostics.">
-                <input type="checkbox" checked={getScores} onChange={() => setGetScores(!getScores)} />
-                {t('getScores')}
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Return synced lyric (LRC) output when available.">
-                <input type="checkbox" checked={getLrc} onChange={() => setGetLrc(!getLrc)} />
-                {t('getLrcLyrics')}
-              </label>
-            </div>
+                {/* Custom Timesteps */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{t('customTimesteps')}</label>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Override the diffusion schedule (comma-separated values)</p>
+                  <input
+                    type="text"
+                    value={customTimesteps}
+                    onChange={(e) => setCustomTimesteps(e.target.value)}
+                    placeholder={t('timestepsPlaceholder')}
+                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                  />
+                </div>
+
+                {/* Score Scale + LM Batch Chunk Size */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Scales score-based guidance.">{t('scoreScale')}</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      max="1"
+                      value={scoreScale}
+                      onChange={(e) => setScoreScale(Number(e.target.value))}
+                      className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400" title="Bigger chunks = faster but more VRAM.">{t('lmBatchChunkSize')}</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="32"
+                      step="1"
+                      value={lmBatchChunkSize}
+                      onChange={(e) => setLmBatchChunkSize(Number(e.target.value))}
+                      className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Toggle checkboxes — Quality */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide font-bold">Quality</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Adaptive Dual Guidance: dynamically adjusts CFG for quality. Base model only; slower.">
+                      <input type="checkbox" checked={useAdg} onChange={() => setUseAdg(!useAdg)} className="accent-pink-600" />
+                      {t('useAdg')}
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Use the formatted caption produced by the AI formatter.">
+                      <input type="checkbox" checked={isFormatCaption} onChange={() => setIsFormatCaption(!isFormatCaption)} className="accent-pink-600" />
+                      {t('formatCaption')}
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Return scorer outputs for diagnostics.">
+                      <input type="checkbox" checked={getScores} onChange={() => setGetScores(!getScores)} className="accent-pink-600" />
+                      {t('getScores')}
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Return synced lyric (LRC) output when available.">
+                      <input type="checkbox" checked={getLrc} onChange={() => setGetLrc(!getLrc)} className="accent-pink-600" />
+                      {t('getLrcLyrics')}
+                    </label>
+                  </div>
+                </div>
+
+                {/* Toggle checkboxes — LM */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide font-bold">LM Controls</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Let the LM reason about metadata like BPM, key, duration.">
+                      <input type="checkbox" checked={useCotMetas} onChange={() => setUseCotMetas(!useCotMetas)} className="accent-pink-600" />
+                      {t('useCotMetas')}
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Let the LM reason about the caption/style text.">
+                      <input type="checkbox" checked={useCotCaption} onChange={() => setUseCotCaption(!useCotCaption)} className="accent-pink-600" />
+                      {t('useCotCaption')}
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Let the LM reason about language selection.">
+                      <input type="checkbox" checked={useCotLanguage} onChange={() => setUseCotLanguage(!useCotLanguage)} className="accent-pink-600" />
+                      {t('useCotLanguage')}
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Allow the LM to run in larger batches for speed (more VRAM).">
+                      <input type="checkbox" checked={allowLmBatch} onChange={() => setAllowLmBatch(!allowLmBatch)} className="accent-pink-600" />
+                      {t('allowLmBatch')}
+                    </label>
+                  </div>
+                </div>
+
+                {/* Toggle checkboxes — Other */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide font-bold">Other</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Auto-generate missing fields when possible.">
+                      <input type="checkbox" checked={autogen} onChange={() => setAutogen(!autogen)} className="accent-pink-600" />
+                      {t('autogen')}
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 cursor-pointer" title="Include debug info for constrained decoding.">
+                      <input type="checkbox" checked={constrainedDecodingDebug} onChange={() => setConstrainedDecodingDebug(!constrainedDecodingDebug)} className="accent-pink-600" />
+                      {t('constrainedDecodingDebug')}
+                    </label>
+                  </div>
+                </div>
+
+                {/* Load Parameters JSON — small link at bottom */}
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors mt-2">
+                  <Upload size={12} />
+                  Load Parameters (JSON)
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleLoadParamsFile}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            )}
           </div>
         )}
         </>)}
@@ -2654,17 +2761,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
         <button
           onClick={customMode ? handleGenerate : handleSimpleGenerate}
           className="w-full h-12 rounded-xl font-bold text-base flex items-center justify-center gap-2 transition-all transform active:scale-[0.98] bg-gradient-to-r from-orange-500 to-pink-600 text-white shadow-lg hover:brightness-110 disabled:opacity-60 disabled:cursor-not-allowed"
-          disabled={isGenerating || simpleGenerating || !isAuthenticated}
+          disabled={isGenerating || !isAuthenticated}
         >
-          {simpleGenerating ? (
-            <>
-              <Loader2 size={18} className="animate-spin" />
-              <span>Preparing...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles size={18} />
-              <span>
+          <>
+            <Sparkles size={18} />
+            <span>
                 {isGenerating
                   ? t('generating')
                   : customMode
@@ -2674,8 +2775,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
                     : t('createButton')
                 }
               </span>
-            </>
-          )}
+          </>
         </button>
       </div>
     </div>
