@@ -1397,40 +1397,41 @@ function AppContent() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-white dark:bg-suno-DEFAULT text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-colors duration-300">
-      <div className="flex-1 flex overflow-hidden">
-        <Sidebar
-          currentView={currentView}
-          onNavigate={(v) => {
-            setCurrentView(v);
-            if (v === 'create') {
-              setMobileShowList(false);
-              window.history.pushState({}, '', '/');
-            } else if (v === 'library') {
-              window.history.pushState({}, '', '/library');
-            } else if (v === 'search') {
-              window.history.pushState({}, '', '/search');
-            } else if (v === 'settings') {
-              window.history.pushState({}, '', '/settings');
-            }
-            if (isMobile) setShowLeftSidebar(false);
-          }}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          user={user}
-          onLogin={() => setShowUsernameModal(true)}
-          onLogout={logout}
-          onOpenSettings={() => setShowSettingsModal(true)}
-          isOpen={showLeftSidebar}
-          onToggle={() => setShowLeftSidebar(!showLeftSidebar)}
-        />
+    <div className="flex h-screen bg-white dark:bg-suno-DEFAULT text-zinc-900 dark:text-white font-sans antialiased selection:bg-pink-500/30 transition-colors duration-300">
+      {/* Sidebar — full height */}
+      <Sidebar
+        currentView={currentView}
+        onNavigate={(v) => {
+          setCurrentView(v);
+          if (v === 'create') {
+            setMobileShowList(false);
+            window.history.pushState({}, '', '/');
+          } else if (v === 'library') {
+            window.history.pushState({}, '', '/library');
+          } else if (v === 'search') {
+            window.history.pushState({}, '', '/search');
+          } else if (v === 'settings') {
+            window.history.pushState({}, '', '/settings');
+          }
+          if (isMobile) setShowLeftSidebar(false);
+        }}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        user={user}
+        onLogin={() => setShowUsernameModal(true)}
+        onLogout={logout}
+        onOpenSettings={() => setShowSettingsModal(true)}
+        isOpen={showLeftSidebar}
+        onToggle={() => setShowLeftSidebar(!showLeftSidebar)}
+      />
 
+      {/* Content + Player column */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <main className="flex-1 flex overflow-hidden relative">
           {renderContent()}
         </main>
-      </div>
 
-      <Player
+        <Player
         currentSong={currentSong}
         isPlaying={isPlaying}
         onTogglePlay={togglePlay}
@@ -1457,6 +1458,7 @@ function AppContent() {
         onDelete={() => currentSong && handleDeleteSong(currentSong)}
         onPlayFirst={playFirst}
       />
+      </div>
 
       <CreatePlaylistModal
         isOpen={isCreatePlaylistModalOpen}

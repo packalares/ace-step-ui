@@ -4,6 +4,7 @@ import {
   Edit3, Upload, X, Volume2, FileAudio, Zap,
   Wand2, Check,
 } from 'lucide-react';
+import { PageLayout, Card, CardHeader, Button } from './ui';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
 import { trainingApi, getTrainingAudioUrl, TrainingSample, DatasetSettings } from '../services/api';
@@ -679,49 +680,39 @@ export const TrainingPanel: React.FC = () => {
   const activeStepIdx = PIPELINE_STEPS.findIndex(s => s.key === activeStep);
 
   return (
-    <div className="h-full w-full flex flex-col bg-zinc-50 dark:bg-suno-panel overflow-hidden">
-      {/* Header */}
-      <div className="px-3 pt-3 pb-1.5 flex-shrink-0">
-        <h2 className="text-base font-bold text-zinc-900 dark:text-white">{t('loraTraining')}</h2>
-        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">Train a LoRA adapter step by step</p>
-      </div>
-
-      {/* Stepper */}
-      <div className="flex items-center gap-0 px-3 pb-2 flex-shrink-0">
-        {PIPELINE_STEPS.map((step, i) => {
-          const Icon = step.icon;
-          const done = completedSteps.has(step.key);
-          const isCurrent = activeStep === step.key;
-          const canClick = canGoToStep(step.key);
-          return (
-            <React.Fragment key={step.key}>
-              {i > 0 && (
-                <div className={`flex-1 h-0.5 mx-1 rounded-full ${done || (isCurrent && i <= activeStepIdx) ? 'bg-pink-500/50' : 'bg-white/10'}`} />
-              )}
+    <PageLayout title={t('loraTraining')} subtitle="Train a style adapter step by step">
+      <div className="flex h-full min-h-0">
+        {/* Left: Vertical Step Navigation */}
+        <div className="w-[160px] flex-shrink-0 border-r border-zinc-800/50 pr-3 space-y-1 pt-1">
+          {PIPELINE_STEPS.map((step, i) => {
+            const Icon = step.icon;
+            const done = completedSteps.has(step.key);
+            const isCurrent = activeStep === step.key;
+            const canClick = canGoToStep(step.key);
+            return (
               <button
+                key={step.key}
                 onClick={() => goToStep(step.key)}
                 disabled={!canClick}
-                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all flex-shrink-0 ${
+                className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[11px] font-medium transition-colors ${
                   isCurrent
-                    ? 'bg-pink-500/20 text-pink-400 border border-pink-500/30'
+                    ? 'bg-pink-500/10 text-pink-400 border border-pink-500/20'
                     : done
-                      ? 'bg-green-500/15 text-green-400'
+                      ? 'text-zinc-400 hover:bg-white/5'
                       : canClick
-                        ? 'bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-200'
-                        : 'bg-white/[0.02] text-zinc-600 cursor-not-allowed'
+                        ? 'text-zinc-500 hover:bg-white/5 hover:text-zinc-300'
+                        : 'text-zinc-600 cursor-not-allowed'
                 }`}
               >
-                {done ? <Check size={12} className="text-green-400" /> : <Icon size={12} />}
-                <span className="hidden sm:inline">{step.label}</span>
-                <span className="sm:hidden">{step.num}</span>
+                {done ? <Check size={12} className="text-green-500" /> : <Icon size={12} />}
+                <span>{step.label}</span>
               </button>
-            </React.Fragment>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
 
-      {/* Step Content */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2 scrollbar-hide">
+        {/* Right: Step Content */}
+        <div className="flex-1 overflow-y-auto pl-4 space-y-2">
 
         {/* ===== STEP 1: UPLOAD ===== */}
         {activeStep === 'upload' && (
@@ -753,12 +744,14 @@ export const TrainingPanel: React.FC = () => {
                 </div>
                 <div className="mt-3 space-y-2">
                   <FieldRow label="Dataset Name">
-                    <input type="text" value={uploadDatasetName} onChange={e => setUploadDatasetName(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="my_lora_dataset" />
+                    <input type="text" value={uploadDatasetName} onChange={e => setUploadDatasetName(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500" placeholder="my_lora_dataset" />
                   </FieldRow>
-                  <button onClick={handleUploadAndBuild} disabled={uploading || !uploadDatasetName.trim()} className="w-full py-2 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2 disabled:opacity-50">
-                    {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                    Upload & Build Dataset ({queuedFiles.length} files)
-                  </button>
+                  <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
+                    <button onClick={handleUploadAndBuild} disabled={uploading || !uploadDatasetName.trim()} className="px-4 py-2 text-xs bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium flex items-center gap-2 disabled:opacity-50">
+                      {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                      Upload & Build Dataset ({queuedFiles.length} files)
+                    </button>
+                  </div>
                 </div>
               </Section>
             )}
@@ -772,7 +765,7 @@ export const TrainingPanel: React.FC = () => {
             {/* Or load existing */}
             <Section title="Or Load Existing Dataset">
               <div className="flex gap-2">
-                <input type="text" value={datasetPath} onChange={e => setDatasetPath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="./datasets/my_dataset.json" />
+                <input type="text" value={datasetPath} onChange={e => setDatasetPath(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500" placeholder="./datasets/my_dataset.json" />
                 <button onClick={handleLoadDataset} disabled={datasetLoading} className="px-3 py-1.5 bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-50">
                   {datasetLoading ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
                   Load
@@ -815,10 +808,12 @@ export const TrainingPanel: React.FC = () => {
                   Only Unlabeled
                 </label>
               </div>
-              <button onClick={handleAutoLabel} disabled={autoLabeling || modelInitializing} className="w-full py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
-                {autoLabeling ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-                Auto-Label All Samples
-              </button>
+              <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
+                <button onClick={handleAutoLabel} disabled={autoLabeling || modelInitializing} className="px-4 py-2 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium flex items-center gap-1.5 border border-zinc-700 disabled:opacity-50">
+                  {autoLabeling ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                  Auto-Label All Samples
+                </button>
+              </div>
               {autoLabelStatus && <p className="text-xs text-zinc-400 mt-1.5 break-words">{autoLabelStatus}</p>}
             </Section>
 
@@ -867,79 +862,96 @@ export const TrainingPanel: React.FC = () => {
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <FieldRow label="Caption">
-                    <input type="text" value={editCaption} onChange={e => setEditCaption(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
-                  </FieldRow>
-                  <FieldRow label="Genre">
-                    <input type="text" value={editGenre} onChange={e => setEditGenre(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
-                  </FieldRow>
-                  <div>
-                    <label className="text-[11px] text-zinc-500 mb-0.5 block">Lyrics</label>
-                    <textarea value={editLyrics} onChange={e => setEditLyrics(e.target.value)} rows={3} className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50 resize-none" />
+                <div className="space-y-3">
+                  {/* Row 1: Caption + Genre side by side */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Caption</label>
+                      <input type="text" value={editCaption} onChange={e => setEditCaption(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Genre</label>
+                      <input type="text" value={editGenre} onChange={e => setEditGenre(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                    </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  {/* Row 2: Lyrics (full width, shorter) */}
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Lyrics</label>
+                    <textarea value={editLyrics} onChange={e => setEditLyrics(e.target.value)} rows={2} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500 resize-none h-16" />
+                  </div>
+                  {/* Row 3: BPM + Key + Language in 3 columns */}
+                  <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="text-[11px] text-zinc-500 mb-0.5 block">BPM</label>
-                      <input type="number" value={editBpm} onChange={e => setEditBpm(parseInt(e.target.value) || 0)} className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">BPM</label>
+                      <input type="number" value={editBpm} onChange={e => setEditBpm(parseInt(e.target.value) || 0)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
                     </div>
                     <div>
-                      <label className="text-[11px] text-zinc-500 mb-0.5 block">Key</label>
-                      <input type="text" value={editKey} onChange={e => setEditKey(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Key</label>
+                      <input type="text" value={editKey} onChange={e => setEditKey(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
                     </div>
                     <div>
-                      <label className="text-[11px] text-zinc-500 mb-0.5 block">Language</label>
-                      <select value={editLanguage} onChange={e => setEditLanguage(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50">
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Language</label>
+                      <select value={editLanguage} onChange={e => setEditLanguage(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500">
                         {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                       </select>
                     </div>
                   </div>
-                  <button onClick={handleSaveSample} disabled={saving} className="w-full py-1.5 bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
-                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Edit3 size={14} />}
-                    Save Sample
-                  </button>
+                  <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
+                    <button onClick={handleSaveSample} disabled={saving} className="px-4 py-2 text-xs bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg font-medium flex items-center gap-1.5 disabled:opacity-50">
+                      {saving ? <Loader2 size={14} className="animate-spin" /> : <Edit3 size={14} />}
+                      Save Sample
+                    </button>
+                  </div>
                   {editSaveStatus && <p className="text-xs text-zinc-400 mt-1 break-words">{editSaveStatus}</p>}
                 </div>
               </Section>
             )}
 
-            {/* Save Dataset & Advance */}
-            <Section title="Save Dataset">
+            {/* Save Dataset & Advance — only show after samples exist */}
+            {sampleCount > 0 && <Section title="Save Dataset">
               <FieldRow label="Save Path">
-                <input type="text" value={savePath} onChange={e => setSavePath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                <input type="text" value={savePath} onChange={e => setSavePath(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500" />
               </FieldRow>
-              <button onClick={handleSaveDataset} disabled={saving} className="w-full mt-2 py-2 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                Save Dataset & Continue
-              </button>
+              <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
+                <button onClick={handleSaveDataset} disabled={saving} className="px-4 py-2 text-xs bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium flex items-center gap-1.5 disabled:opacity-50">
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  Save Dataset & Continue
+                </button>
+              </div>
               {saveStatus && <p className="text-xs text-zinc-400 mt-1.5 break-words">{saveStatus}</p>}
-            </Section>
+            </Section>}
           </>
         )}
 
         {/* ===== STEP 3: PREPROCESS ===== */}
         {activeStep === 'preprocess' && (
           <>
-            <Section title="Preprocess to Tensors">
-              <p className="text-[11px] text-zinc-500 mb-3">Convert your labeled dataset into training-ready tensors.</p>
-              <div className="space-y-2">
-                <FieldRow label="Dataset">
-                  <span className="text-xs text-zinc-300 truncate">{savePath || datasetPath}</span>
-                </FieldRow>
-                <FieldRow label="Output Dir">
-                  <input type="text" value={preprocessOutputDir} onChange={e => setPreprocessOutputDir(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
-                </FieldRow>
-              </div>
-              <button onClick={handlePreprocess} disabled={preprocessing} className="w-full mt-3 py-2 bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-600 hover:to-violet-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
-                {preprocessing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-                {preprocessing ? 'Preprocessing...' : 'Start Preprocessing'}
-              </button>
-              {preprocessStatus && (
-                <div className={`mt-2 px-3 py-2 rounded-lg text-xs ${preprocessStatus.startsWith('Error') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
-                  {preprocessStatus}
+            <div className="max-w-lg">
+              <Section title="Preprocess to Tensors">
+                <p className="text-[11px] text-zinc-500 mb-3">Convert your labeled dataset into training-ready tensors.</p>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Dataset</label>
+                    <div className="text-xs text-zinc-300 truncate bg-zinc-900/50 rounded-lg px-3 py-1.5 border border-zinc-800">{savePath || datasetPath}</div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Output Dir</label>
+                    <input type="text" value={preprocessOutputDir} onChange={e => setPreprocessOutputDir(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                  </div>
                 </div>
-              )}
-            </Section>
+                <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
+                  <button onClick={handlePreprocess} disabled={preprocessing} className="px-4 py-2 text-xs bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium flex items-center gap-1.5 disabled:opacity-50">
+                    {preprocessing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                    {preprocessing ? 'Preprocessing...' : 'Start Preprocessing'}
+                  </button>
+                </div>
+                {preprocessStatus && (
+                  <div className={`mt-2 px-3 py-2 rounded-lg text-xs ${preprocessStatus.startsWith('Error') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+                    {preprocessStatus}
+                  </div>
+                )}
+              </Section>
+            </div>
           </>
         )}
 
@@ -949,8 +961,8 @@ export const TrainingPanel: React.FC = () => {
             {/* Load Tensors */}
             <Section title="Preprocessed Dataset">
               <div className="flex gap-2">
-                <input type="text" value={trainingParams.tensorDir} onChange={e => setTrainingParams(p => ({ ...p, tensorDir: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
-                <button onClick={handleLoadTensors} className="px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded-lg text-xs font-medium flex items-center gap-1.5">
+                <input type="text" value={trainingParams.tensorDir} onChange={e => setTrainingParams(p => ({ ...p, tensorDir: e.target.value }))} className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500" />
+                <button onClick={handleLoadTensors} className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium flex items-center gap-1.5 border border-zinc-700">
                   <FolderOpen size={14} />
                   Load
                 </button>
@@ -958,43 +970,52 @@ export const TrainingPanel: React.FC = () => {
               {trainingDatasetInfo && <p className="text-xs text-zinc-400 mt-1.5 break-words whitespace-pre-wrap">{trainingDatasetInfo}</p>}
             </Section>
 
-            {/* LoRA Settings */}
+            {/* LoRA Settings — 3 columns */}
             <Section title="LoRA Settings">
-              <div className="space-y-2">
-                <ParamSlider label="Rank (r)" value={trainingParams.rank} min={4} max={256} step={4} onChange={v => setTrainingParams(p => ({ ...p, rank: v }))} />
-                <ParamSlider label="Alpha (a)" value={trainingParams.alpha} min={4} max={512} step={4} onChange={v => setTrainingParams(p => ({ ...p, alpha: v }))} />
-                <ParamSlider label="Dropout" value={trainingParams.dropout} min={0} max={0.5} step={0.05} onChange={v => setTrainingParams(p => ({ ...p, dropout: v }))} />
+              <div className="grid grid-cols-3 gap-3">
+                <CompactSlider label="Rank (r)" value={trainingParams.rank} min={4} max={256} step={4} onChange={v => setTrainingParams(p => ({ ...p, rank: v }))} />
+                <CompactSlider label="Alpha (a)" value={trainingParams.alpha} min={4} max={512} step={4} onChange={v => setTrainingParams(p => ({ ...p, alpha: v }))} />
+                <CompactSlider label="Dropout" value={trainingParams.dropout} min={0} max={0.5} step={0.05} onChange={v => setTrainingParams(p => ({ ...p, dropout: v }))} />
               </div>
             </Section>
 
-            {/* Training Parameters */}
+            {/* Training Parameters — grid */}
             <Section title="Training Parameters">
-              <div className="space-y-2">
-                <FieldRow label="Learning Rate">
-                  <input type="number" value={trainingParams.learningRate} onChange={e => setTrainingParams(p => ({ ...p, learningRate: parseFloat(e.target.value) || 0.0003 }))} step={0.0001} className="w-28 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
-                </FieldRow>
-                <ParamSlider label="Max Epochs" value={trainingParams.epochs} min={1} max={4000} step={1} onChange={v => setTrainingParams(p => ({ ...p, epochs: v }))} />
-                <ParamSlider label="Batch Size" value={trainingParams.batchSize} min={1} max={8} step={1} onChange={v => setTrainingParams(p => ({ ...p, batchSize: v }))} />
-                <ParamSlider label="Gradient Accumulation" value={trainingParams.gradientAccumulation} min={1} max={16} step={1} onChange={v => setTrainingParams(p => ({ ...p, gradientAccumulation: v }))} />
-                <ParamSlider label="Save Every (epochs)" value={trainingParams.saveEvery} min={50} max={1000} step={50} onChange={v => setTrainingParams(p => ({ ...p, saveEvery: v }))} />
-                <FieldRow label="Output Dir">
-                  <input type="text" value={trainingParams.outputDir} onChange={e => setTrainingParams(p => ({ ...p, outputDir: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
-                </FieldRow>
-                <FieldRow label="Resume">
-                  <input type="text" value={trainingParams.resumeCheckpoint} onChange={e => setTrainingParams(p => ({ ...p, resumeCheckpoint: e.target.value }))} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" placeholder="./lora_output/checkpoints/epoch_200" />
-                </FieldRow>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Learning Rate</label>
+                  <input type="number" value={trainingParams.learningRate} onChange={e => setTrainingParams(p => ({ ...p, learningRate: parseFloat(e.target.value) || 0.0003 }))} step={0.0001} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                </div>
+                <CompactSlider label="Max Epochs" value={trainingParams.epochs} min={1} max={4000} step={1} onChange={v => setTrainingParams(p => ({ ...p, epochs: v }))} />
+                <CompactSlider label="Batch Size" value={trainingParams.batchSize} min={1} max={8} step={1} onChange={v => setTrainingParams(p => ({ ...p, batchSize: v }))} />
+                <CompactSlider label="Gradient Accum." value={trainingParams.gradientAccumulation} min={1} max={16} step={1} onChange={v => setTrainingParams(p => ({ ...p, gradientAccumulation: v }))} />
+                <CompactSlider label="Save Every (epochs)" value={trainingParams.saveEvery} min={50} max={1000} step={50} onChange={v => setTrainingParams(p => ({ ...p, saveEvery: v }))} />
+              </div>
+            </Section>
+
+            {/* Output — 2 columns */}
+            <Section title="Output">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Output Dir</label>
+                  <input type="text" value={trainingParams.outputDir} onChange={e => setTrainingParams(p => ({ ...p, outputDir: e.target.value }))} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Resume Checkpoint</label>
+                  <input type="text" value={trainingParams.resumeCheckpoint} onChange={e => setTrainingParams(p => ({ ...p, resumeCheckpoint: e.target.value }))} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" placeholder="./lora_output/checkpoints/epoch_200" />
+                </div>
               </div>
             </Section>
 
             {/* Training Controls */}
-            <div className="flex gap-2">
+            <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
               {!isTraining ? (
-                <button onClick={handleStartTraining} className="flex-1 py-2 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2">
+                <button onClick={handleStartTraining} className="px-4 py-2 text-xs bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium flex items-center gap-2">
                   <Play size={16} />
                   Start Training
                 </button>
               ) : (
-                <button onClick={handleStopTraining} className="flex-1 py-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg text-xs font-medium flex items-center justify-center gap-2">
+                <button onClick={handleStopTraining} className="px-4 py-2 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg font-medium flex items-center gap-2">
                   <Square size={16} />
                   Stop Training
                 </button>
@@ -1027,16 +1048,18 @@ export const TrainingPanel: React.FC = () => {
               <p className="text-[11px] text-zinc-500 mb-3">Export your trained LoRA adapter for use in generation.</p>
               <div className="space-y-2">
                 <FieldRow label="Export Path">
-                  <input type="text" value={exportPath} onChange={e => setExportPath(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                  <input type="text" value={exportPath} onChange={e => setExportPath(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500" />
                 </FieldRow>
                 <FieldRow label="LoRA Output Dir">
-                  <input type="text" value={exportOutputDir} onChange={e => setExportOutputDir(e.target.value)} className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-pink-500/50" />
+                  <input type="text" value={exportOutputDir} onChange={e => setExportOutputDir(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500" />
                 </FieldRow>
               </div>
-              <button onClick={handleExportLora} disabled={exporting} className="w-full mt-3 py-2 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-2 disabled:opacity-50">
-                {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                Export LoRA
-              </button>
+              <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
+                <button onClick={handleExportLora} disabled={exporting} className="px-4 py-2 text-xs bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium flex items-center gap-2 disabled:opacity-50">
+                  {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  Export LoRA
+                </button>
+              </div>
               {exportStatus && (
                 <div className={`mt-2 px-3 py-2 rounded-lg text-xs ${exportStatus.startsWith('Error') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
                   {exportStatus}
@@ -1054,8 +1077,9 @@ export const TrainingPanel: React.FC = () => {
             )}
           </>
         )}
+        </div>
       </div>
-    </div>
+    </PageLayout>
   );
 };
 
@@ -1089,6 +1113,23 @@ const ParamSlider: React.FC<{
       <label className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">{label}</label>
       <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">{step < 1 ? value.toFixed(2) : value}</span>
     </div>
-    <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(parseFloat(e.target.value))} className="w-full accent-pink-500 h-1.5" />
+    <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(parseFloat(e.target.value))} className="w-full accent-pink-500 h-1" />
+  </div>
+);
+
+const CompactSlider: React.FC<{
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}> = ({ label, value, min, max, step, onChange }) => (
+  <div className="bg-zinc-900/50 rounded-lg p-2.5">
+    <div className="flex items-center justify-between mb-1">
+      <label className="text-[10px] text-zinc-500 uppercase tracking-wide">{label}</label>
+      <span className="text-[10px] text-zinc-400 font-mono">{step < 1 ? value.toFixed(2) : value}</span>
+    </div>
+    <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(parseFloat(e.target.value))} className="w-full accent-pink-500 h-1" />
   </div>
 );

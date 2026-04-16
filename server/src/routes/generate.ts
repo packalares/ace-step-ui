@@ -355,6 +355,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
     );
 
     // Start generation
+    trackGeneration();
     const { jobId: hfJobId } = await generateMusicViaAPI(params);
 
     // Update job with ACE-Step task ID
@@ -1370,6 +1371,137 @@ router.post('/full-analysis', authMiddleware, async (req: AuthenticatedRequest, 
   } catch (error) {
     console.error('Full analysis error:', error);
     res.status(500).json({ error: (error as Error).message || 'Full analysis failed' });
+  }
+});
+
+// --- GPU Unload: kill ACE-Step Python and restart fresh ---
+
+let lastGenerationTime = Date.now();
+let autoUnloadTimer: ReturnType<typeof setTimeout> | null = null;
+let autoUnloadMinutes = 0; // 0 = disabled
+
+// Track last generation time
+function trackGeneration() {
+  lastGenerationTime = Date.now();
+  resetAutoUnloadTimer();
+}
+
+function resetAutoUnloadTimer() {
+  if (autoUnloadTimer) clearTimeout(autoUnloadTimer);
+  if (autoUnloadMinutes > 0) {
+    autoUnloadTimer = setTimeout(() => {
+      console.log(`[AutoUnload] ${autoUnloadMinutes}min idle — unloading GPU models`);
+      restartAceStep().catch(err => console.error('[AutoUnload] Failed:', err));
+    }, autoUnloadMinutes * 60 * 1000);
+  }
+}
+
+async function restartAceStep(): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Check if training is running
+    const apiUrl = config.acestep.apiUrl || 'http://127.0.0.1:8000';
+    try {
+      const statusRes = await fetch(`${apiUrl}/v1/training/status`, { signal: AbortSignal.timeout(3000) });
+      if (statusRes.ok) {
+        const data = await statusRes.json() as any;
+        if (data?.data?.is_training) {
+          return { success: false, error: 'Cannot unload while training is in progress' };
+        }
+      }
+    } catch { /* API might be down already */ }
+
+    // Kill Python process
+    const { execSync } = await import('child_process');
+    try {
+      execSync("pkill -f 'from acestep.api_server'", { timeout: 5000 });
+    } catch { /* might already be dead */ }
+
+    // Wait a moment for process to die
+    await new Promise(r => setTimeout(r, 2000));
+
+    // Restart ACE-Step in background
+    const aceStepDir = process.env.ACESTEP_PATH || '/app/ACE-Step-1.5';
+    const proc = spawn('python3', ['-c', `
+import sys; sys.path.insert(0, '${aceStepDir}')
+from acestep.api_server import create_app
+import uvicorn
+app = create_app()
+uvicorn.run(app, host='0.0.0.0', port=8000)
+`], {
+      cwd: aceStepDir,
+      env: { ...process.env, ACESTEP_PATH: aceStepDir },
+      detached: true,
+      stdio: 'ignore',
+    });
+    proc.unref();
+
+    // Wait for health check
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const healthRes = await fetch(`${apiUrl}/health`, { signal: AbortSignal.timeout(2000) });
+        if (healthRes.ok) {
+          return { success: true };
+        }
+      } catch { /* not ready yet */ }
+    }
+
+    return { success: false, error: 'ACE-Step did not restart within 60 seconds' };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+// POST /api/generate/gpu/unload — kill ACE-Step and restart fresh (frees GPU memory)
+router.post('/gpu/unload', authMiddleware, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await restartAceStep();
+    if (result.success) {
+      res.json({ status: 'GPU models unloaded. ACE-Step restarted in lazy mode.' });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// GET /api/generate/gpu/status — check GPU memory and loaded models
+router.get('/gpu/status', async (_req, res: Response) => {
+  try {
+    const apiUrl = config.acestep.apiUrl || 'http://127.0.0.1:8000';
+    let inventory = null;
+    try {
+      const invRes = await fetch(`${apiUrl}/v1/model_inventory`, { signal: AbortSignal.timeout(3000) });
+      if (invRes.ok) inventory = await invRes.json();
+    } catch { /* API might be down */ }
+
+    res.json({
+      aceStepRunning: !!inventory,
+      inventory: inventory?.data || null,
+      lastGenerationTime,
+      idleMinutes: Math.round((Date.now() - lastGenerationTime) / 60000),
+      autoUnloadMinutes,
+    });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// POST /api/generate/gpu/auto-unload — set auto-unload timer (0 = disabled)
+router.post('/gpu/auto-unload', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { minutes } = req.body;
+    autoUnloadMinutes = Math.max(0, Math.min(480, Number(minutes) || 0));
+    resetAutoUnloadTimer();
+    res.json({
+      autoUnloadMinutes,
+      status: autoUnloadMinutes > 0
+        ? `Auto-unload set to ${autoUnloadMinutes} minutes of idle time`
+        : 'Auto-unload disabled',
+    });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
   }
 });
 

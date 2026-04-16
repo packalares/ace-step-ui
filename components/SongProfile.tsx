@@ -6,6 +6,7 @@ import { useI18n } from '../context/I18nContext';
 import { ArrowLeft, Play, Pause, Heart, Share2, MoreHorizontal, ThumbsDown, Music as MusicIcon, Edit3, Eye } from 'lucide-react';
 import { ShareModal } from './ShareModal';
 import { SongDropdownMenu } from './SongDropdownMenu';
+import { Button, IconButton, Badge } from './ui';
 
 interface SongProfileProps {
     songId: string;
@@ -163,136 +164,128 @@ export const SongProfile: React.FC<SongProfileProps> = ({ songId, onBack, onPlay
     return (
         <div className="w-full h-full flex flex-col bg-zinc-50 dark:bg-black overflow-hidden">
             {/* Header */}
-            <div className="border-b border-zinc-200 dark:border-zinc-800 px-4 md:px-4 py-3 flex-shrink-0">
+            <div className="border-b border-zinc-200 dark:border-zinc-800 px-3 py-2 flex-shrink-0">
                 <button
                     onClick={onBack}
-                    className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white mb-3 transition-colors text-xs"
+                    className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white mb-2 transition-colors text-[11px]"
                 >
-                    <ArrowLeft size={20} />
+                    <ArrowLeft size={14} />
                     <span>{t('back')}</span>
                 </button>
 
-                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
                     <div className="flex-1">
-                        <h1 className="text-lg font-bold text-zinc-900 dark:text-white mb-1.5">{song.title}</h1>
-                        <div className="flex items-center gap-2 mb-2">
+                        <h1 className="text-sm font-bold text-zinc-900 dark:text-white mb-1">{song.title}</h1>
+                        <div className="flex items-center gap-2 mb-1.5">
                             <div
                                 onClick={() => song.creator && onNavigateToProfile(song.creator)}
-                                className="flex items-center gap-2 cursor-pointer hover:underline"
+                                className="flex items-center gap-1.5 cursor-pointer hover:underline"
                             >
-                                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white overflow-hidden">
+                                <div className="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-[9px] font-bold text-white overflow-hidden">
                                     {song.creator_avatar ? (
                                         <img src={song.creator_avatar} alt={song.creator || 'Creator'} className="w-full h-full object-cover" />
                                     ) : (
                                         song.creator ? song.creator[0].toUpperCase() : 'A'
                                     )}
                                 </div>
-                                <span className="text-xs text-zinc-900 dark:text-white font-semibold">{song.creator || 'Anonymous'}</span>
+                                <span className="text-[11px] text-zinc-400">{song.creator || 'Anonymous'}</span>
                             </div>
                         </div>
 
                         {/* Tags */}
-                        <div className="flex flex-wrap gap-2 mb-2">
+                        <div className="flex flex-wrap gap-1.5 mb-1.5">
                             {song.style.split(',').slice(0, 4).map((tag, i) => (
-                                <span key={i} className="px-1.5 py-0.5 bg-zinc-200 dark:bg-zinc-800 rounded text-[11px] text-zinc-600 dark:text-zinc-300">
-                                    {tag.trim()}
-                                </span>
+                                <Badge key={i} variant="default" size="sm">{tag.trim()}</Badge>
                             ))}
                         </div>
 
-                        <div className="text-[11px] text-zinc-500">
+                        <div className="text-[10px] text-zinc-500">
                             {new Date(song.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} at {new Date(song.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                             {!song.isPublic && song.userId === user?.id && (
-                                <span className="ml-2 px-2 py-0.5 bg-zinc-200 dark:bg-zinc-800 rounded text-xs text-zinc-600 dark:text-zinc-400">Private</span>
+                                <Badge variant="default" size="sm">Private</Badge>
                             )}
                         </div>
                     </div>
 
                     {/* Related Songs Tab - Hidden on mobile */}
-                    <div className="hidden md:flex items-center gap-2">
-                        <button className="px-3 py-1.5 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-full text-xs font-semibold">
-                            Similar
-                        </button>
-                        <button
-                            onClick={() => song.creator && onNavigateToProfile(song.creator)}
-                            className="px-3 py-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white text-xs font-semibold transition-colors"
-                        >
+                    <div className="hidden md:flex items-center gap-1.5">
+                        <Button variant="primary" size="sm">Similar</Button>
+                        <Button variant="ghost" size="sm" onClick={() => song.creator && onNavigateToProfile(song.creator)}>
                             By {song.creator || 'Artist'}
-                        </button>
+                        </Button>
                     </div>
                 </div>
             </div>
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto">
-                <div className="max-w-3xl mx-auto px-4 md:px-4 py-3 md:py-4 pb-24 lg:pb-28">
+                <div className="max-w-3xl mx-auto px-3 py-3 pb-24 lg:pb-28">
 
                     {/* Left Column: Song Details */}
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                         {/* Cover Art */}
-                        <div className="relative aspect-square max-w-[12rem] md:max-w-[14rem] mx-auto lg:mx-0 rounded-xl overflow-hidden shadow-2xl">
+                        <div className="relative aspect-square max-w-[160px] mx-auto rounded-xl overflow-hidden shadow-xl">
                             <img src={song.coverUrl} alt={song.title} className={`w-full h-full object-cover transition-transform duration-500 ${isCurrentlyPlaying ? 'scale-105' : ''}`} />
                             <button
                                 onClick={() => onPlay(song)}
                                 className={`absolute inset-0 transition-colors flex items-center justify-center group ${isCurrentSong ? 'bg-black/50' : 'bg-black/40 hover:bg-black/50'}`}
                             >
-                                <div className="w-14 h-14 md:w-16 md:h-16 rounded-full bg-white group-hover:scale-110 transition-transform flex items-center justify-center shadow-xl">
+                                <div className="w-12 h-12 rounded-full bg-white group-hover:scale-110 transition-transform flex items-center justify-center shadow-xl">
                                     {isCurrentlyPlaying ? (
-                                        <Pause size={28} className="text-black fill-black md:w-8 md:h-8" />
+                                        <Pause size={22} className="text-black fill-black" />
                                     ) : (
-                                        <Play size={28} className="text-black fill-black ml-1 md:w-8 md:h-8" />
+                                        <Play size={22} className="text-black fill-black ml-0.5" />
                                     )}
                                 </div>
                             </button>
                             {isCurrentlyPlaying && (
-                                <div className="absolute bottom-4 left-4 flex items-center gap-1">
-                                    <span className="w-1.5 h-4 bg-pink-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
-                                    <span className="w-1.5 h-6 bg-pink-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
-                                    <span className="w-1.5 h-3 bg-pink-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
-                                    <span className="w-1.5 h-7 bg-pink-500 rounded-full animate-pulse" style={{ animationDelay: '450ms' }} />
+                                <div className="absolute bottom-3 left-3 flex items-center gap-1">
+                                    <span className="w-1 h-3 bg-pink-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                                    <span className="w-1 h-5 bg-pink-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
+                                    <span className="w-1 h-2.5 bg-pink-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
+                                    <span className="w-1 h-5 bg-pink-500 rounded-full animate-pulse" style={{ animationDelay: '450ms' }} />
                                 </div>
                             )}
                         </div>
 
                         {/* Action Buttons */}
-                        <div className="flex items-center justify-center lg:justify-start gap-2 flex-wrap">
-                            <div className="flex items-center gap-1.5 bg-zinc-200 dark:bg-zinc-900 px-2.5 py-1.5 rounded-full text-xs">
-                                <Eye size={16} className="text-zinc-600 dark:text-white" />
+                        <div className="flex items-center justify-center lg:justify-start gap-1 flex-wrap">
+                            <div className="flex items-center gap-1 bg-zinc-200 dark:bg-zinc-900 px-2 py-1 rounded-full text-[11px]">
+                                <Eye size={12} className="text-zinc-600 dark:text-white" />
                                 <span className="text-zinc-900 dark:text-white font-semibold">{song.viewCount || 0}</span>
                             </div>
                             <button
                                 onClick={() => onToggleLike?.(song.id)}
-                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs transition-colors ${isLiked ? 'bg-pink-500 text-white' : 'bg-zinc-200 dark:bg-zinc-900 hover:bg-zinc-300 dark:hover:bg-zinc-800 text-zinc-900 dark:text-white'}`}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-full text-[11px] transition-colors ${isLiked ? 'bg-pink-500 text-white' : 'bg-zinc-200 dark:bg-zinc-900 hover:bg-zinc-300 dark:hover:bg-zinc-800 text-zinc-900 dark:text-white'}`}
                             >
-                                <Heart size={16} className={isLiked ? 'fill-current' : ''} />
+                                <Heart size={12} className={isLiked ? 'fill-current' : ''} />
                                 <span className="font-semibold">{song.likeCount || 0}</span>
                             </button>
                             {user?.id === song.userId && (
-                                <button
+                                <Button
+                                    variant="primary"
+                                    size="sm"
                                     onClick={() => {
                                         if (!song.audioUrl) return;
                                         const audioUrl = song.audioUrl.startsWith('http') ? song.audioUrl : `${window.location.origin}${song.audioUrl}`;
                                         window.open(`/editor?audioUrl=${encodeURIComponent(audioUrl)}`, '_blank');
                                     }}
-                                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded-full text-xs font-semibold transition-colors text-white"
                                 >
-                                    <Edit3 size={16} />
+                                    <Edit3 size={12} />
                                     <span className="hidden md:inline">Edit</span>
-                                </button>
+                                </Button>
                             )}
-                            <button
+                            <IconButton
+                                icon={<Share2 size={14} />}
                                 onClick={() => setShareModalOpen(true)}
-                                className="p-2 bg-zinc-200 dark:bg-zinc-900 hover:bg-zinc-300 dark:hover:bg-zinc-800 rounded-full transition-colors"
-                            >
-                                <Share2 size={16} className="text-zinc-700 dark:text-white" />
-                            </button>
+                                title="Share"
+                            />
                             <div className="relative">
-                                <button
+                                <IconButton
+                                    icon={<MoreHorizontal size={14} />}
                                     onClick={() => setShowDropdown(!showDropdown)}
-                                    className="p-2 bg-zinc-200 dark:bg-zinc-900 hover:bg-zinc-300 dark:hover:bg-zinc-800 rounded-full transition-colors"
-                                >
-                                    <MoreHorizontal size={16} className="text-zinc-700 dark:text-white" />
-                                </button>
+                                    title="More"
+                                />
                                 {song && (
                                     <SongDropdownMenu
                                         song={song}
@@ -310,10 +303,12 @@ export const SongProfile: React.FC<SongProfileProps> = ({ songId, onBack, onPlay
 
                         {/* Lyrics */}
                         {song.lyrics && (
-                            <div className="bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3">
-                                <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-2">Lyrics</h3>
-                                <div className="text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-line leading-relaxed font-mono max-h-72 md:max-h-96 overflow-y-auto">
-                                    {song.lyrics}
+                            <div>
+                                <h4 className="text-[9px] uppercase tracking-widest text-zinc-500 mb-1.5">Lyrics</h4>
+                                <div className="bg-zinc-900/30 rounded-lg p-3">
+                                    <div className="text-[11px] text-zinc-700 dark:text-zinc-300 whitespace-pre-line leading-relaxed font-mono max-h-64 md:max-h-80 overflow-y-auto">
+                                        {song.lyrics}
+                                    </div>
                                 </div>
                             </div>
                         )}

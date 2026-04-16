@@ -4,6 +4,7 @@ import { Song, Playlist } from '../types';
 import { songsApi, usersApi, playlistsApi, searchApi, UserProfile, getAudioUrl } from '../services/api';
 import { useI18n } from '../context/I18nContext';
 import { GENRE_KEYS } from '../data/genres';
+import { PageLayout, Pill } from './ui';
 
 interface SearchPageProps {
   onPlaySong?: (song: Song, list?: Song[]) => void;
@@ -195,36 +196,36 @@ export const SearchPage: React.FC<SearchPageProps> = ({
   const isSearching = searchQuery.trim().length > 0;
 
   return (
-    <div className="flex-1 bg-zinc-50 dark:bg-[#0a0a0a] h-full overflow-y-auto custom-scrollbar">
-      <div className="max-w-[1400px] mx-auto px-6 py-6 pb-24 lg:pb-32">
+    <PageLayout title={isSearching ? undefined : 'Discover'} subtitle={isSearching ? undefined : 'Explore songs, creators, and playlists'}>
+      <div className="max-w-[1400px] mx-auto">
         {/* Search Input */}
-        <div className="mb-8">
-          <div className="relative max-w-3xl">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400" size={20} />
+        <div className="mb-5">
+          <div className="relative max-w-2xl">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
             <input
               type="text"
               placeholder={t('searchSongsPlaceholder')}
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="w-full h-11 pl-12 pr-12 bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-white/10 rounded-full text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 transition-all"
+              className="w-full h-9 pl-10 pr-10 bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-white/10 rounded-full text-xs text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:border-pink-500 dark:focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 transition-all"
             />
             {searching ? (
-              <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 text-pink-500 animate-spin" size={18} />
+              <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 text-pink-500 animate-spin" size={14} />
             ) : searchQuery && (
               <button
                 onClick={() => { setSearchQuery(''); setSearchResults(null); }}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-white"
               >
-                <X size={18} />
+                <X size={14} />
               </button>
             )}
           </div>
         </div>
 
         {/* Songs Section */}
-        <section className="mb-10">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-white">
+        <section className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
               {isSearching ? `${t('songsMatching')} "${searchQuery}"` : t('featuredSongs')}
               {isSearching && displaySongs.length > 0 && (
                 <span className="ml-2 text-sm font-normal text-zinc-500">({displaySongs.length})</span>
@@ -276,10 +277,12 @@ export const SearchPage: React.FC<SearchPageProps> = ({
           ) : null}
         </section>
 
+        <div className="border-b border-zinc-200 dark:border-zinc-800/50 mb-6" />
+
         {/* Creators Section */}
-        <section className="mb-10">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-white">
+        <section className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
               {isSearching ? `${t('creatorsMatching')} "${searchQuery}"` : t('featuredCreators')}
               {isSearching && displayCreators.length > 0 && (
                 <span className="ml-2 text-sm font-normal text-zinc-500">({displayCreators.length})</span>
@@ -305,8 +308,8 @@ export const SearchPage: React.FC<SearchPageProps> = ({
           {loading ? (
             <div className="flex gap-5 overflow-x-auto pb-2">
               {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="flex-shrink-0 w-[110px] animate-pulse">
-                  <div className="w-[90px] h-[90px] mx-auto rounded-full bg-zinc-200 dark:bg-zinc-800 mb-2" />
+                <div key={i} className="flex-shrink-0 w-[80px] animate-pulse">
+                  <div className="w-10 h-10 mx-auto rounded-full bg-zinc-200 dark:bg-zinc-800 mb-2" />
                   <div className="h-4 bg-zinc-200 dark:bg-zinc-800 rounded mx-2" />
                 </div>
               ))}
@@ -335,10 +338,12 @@ export const SearchPage: React.FC<SearchPageProps> = ({
           )}
         </section>
 
+        <div className="border-b border-zinc-200 dark:border-zinc-800/50 mb-6" />
+
         {/* Playlists Section */}
-        <section className="mb-10">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-white">
+        <section className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
               {isSearching ? `${t('playlistsMatching')} "${searchQuery}"` : t('featuredPlaylists')}
               {isSearching && displayPlaylists.length > 0 && (
                 <span className="ml-2 text-sm font-normal text-zinc-500">({displayPlaylists.length})</span>
@@ -397,36 +402,29 @@ export const SearchPage: React.FC<SearchPageProps> = ({
           )}
         </section>
 
+        <div className="border-b border-zinc-200 dark:border-zinc-800/50 mb-6" />
+
         {/* Genres */}
-        <section className="mb-10">
-          <h2 className="text-lg font-bold text-zinc-900 dark:text-white mb-4">{t('genres')}</h2>
-          <div className="flex flex-wrap gap-2">
+        <section className="mb-6">
+          <h2 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-3">{t('genres')}</h2>
+          <div className="flex flex-wrap gap-1.5">
             {GENRE_KEYS.map((genreKey) => {
               const genreLabel = t(genreKey);
               return (
-                <button
+                <Pill
                   key={genreKey}
+                  active={searchQuery === genreLabel}
                   onClick={() => handleGenreClick(genreLabel)}
-                  className={`px-3 py-1.5 border rounded-full text-sm transition-all duration-200 group flex items-center gap-1.5 ${
-                    searchQuery === genreLabel
-                      ? 'bg-pink-500 border-pink-500 text-white'
-                      : 'bg-zinc-100 dark:bg-zinc-800/60 border-zinc-200 dark:border-white/5 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700/60 hover:border-pink-500/30 hover:text-pink-600 dark:hover:text-pink-400'
-                  }`}
                 >
                   {genreLabel}
-                  <Copy
-                    size={12}
-                    className={`opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${searchQuery === genreLabel ? 'text-white/70' : ''}`}
-                    onClick={(e) => { e.stopPropagation(); handleCopyTag(genreLabel); }}
-                  />
-                  {copiedTag === genreLabel && <Check size={12} className="text-green-500" />}
-                </button>
+                  {copiedTag === genreLabel && <Check size={10} className="inline ml-0.5 text-green-500" />}
+                </Pill>
               );
             })}
           </div>
         </section>
       </div>
-    </div>
+    </PageLayout>
   );
 };
 
@@ -537,20 +535,20 @@ const CreatorCard: React.FC<CreatorCardProps> = ({
 }) => {
   return (
     <div
-      className="flex-shrink-0 w-[110px] text-center cursor-pointer group"
+      className="flex-shrink-0 w-[80px] text-center cursor-pointer group"
       onClick={() => onNavigateToProfile?.(creator.username)}
     >
-      <div className="w-[90px] h-[90px] mx-auto rounded-full overflow-hidden mb-2 ring-2 ring-transparent group-hover:ring-pink-500 transition-all shadow-lg">
+      <div className="w-10 h-10 mx-auto rounded-full overflow-hidden mb-2 ring-2 ring-transparent group-hover:ring-pink-500 transition-all shadow-lg">
         <img
           src={creator.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${creator.username}`}
           alt={creator.username}
           className="w-full h-full object-cover"
         />
       </div>
-      <div className="font-semibold text-zinc-900 dark:text-white text-sm truncate group-hover:text-pink-500 transition-colors px-1">
+      <div className="font-semibold text-zinc-900 dark:text-white text-[11px] truncate group-hover:text-pink-500 transition-colors px-1">
         {creator.username}
       </div>
-      <div className="text-[11px] text-zinc-500 truncate px-1">@{creator.username.toLowerCase().replace(/\s/g, '')}</div>
+      <div className="text-[10px] text-zinc-500 truncate px-1">@{creator.username.toLowerCase().replace(/\s/g, '')}</div>
     </div>
   );
 };

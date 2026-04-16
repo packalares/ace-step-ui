@@ -7,6 +7,7 @@ import { SongDropdownMenu } from './SongDropdownMenu';
 import { ShareModal } from './ShareModal';
 import { AlbumCover } from './AlbumCover';
 import { songsApi } from '../services/api';
+import { Badge } from './ui';
 
 interface SongListProps {
     songs: Song[];
@@ -216,27 +217,27 @@ export const SongList: React.FC<SongListProps> = ({
     const selectedSongs = selectableSongs.filter(song => selectedIds.has(song.id));
 
     return (
-        <div className="flex-1 bg-white dark:bg-black h-full overflow-y-auto custom-scrollbar p-4 pb-28 transition-colors duration-300">
-            <div className="max-w-5xl mx-auto w-full"> {/* Container constraint */}
+        <div className="flex-1 bg-white dark:bg-black h-full overflow-y-auto custom-scrollbar p-3 pb-28 transition-colors duration-300 pt-4">
+            <div className="max-w-5xl mx-auto w-full">
 
                 {/* Header */}
-                <div className="flex flex-col gap-4 mb-6">
-                    <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <div className="flex flex-col gap-2 mb-3">
+                    <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 dark:text-zinc-400">
                         <span className="hover:text-black dark:hover:text-white cursor-pointer transition-colors">Workspaces</span>
-                        <span className="text-zinc-400 dark:text-zinc-600">›</span>
+                        <span className="text-zinc-400 dark:text-zinc-600">/</span>
                         <span className="text-zinc-900 dark:text-white font-medium">My Workspace</span>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                         <div className="relative group flex-1">
                             <input
                                 type="text"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder={t('searchYourSongs')}
-                                className="w-full bg-zinc-100 dark:bg-[#121214] border border-zinc-200 dark:border-white/10 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-400 dark:focus:border-white/20 placeholder-zinc-500 dark:placeholder-zinc-600 transition-colors"
+                                className="w-full bg-zinc-100 dark:bg-[#121214] border border-zinc-200 dark:border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-[11px] text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-400 dark:focus:border-white/20 placeholder-zinc-500 dark:placeholder-zinc-600 transition-colors"
                             />
-                            <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5 group-focus-within:text-black dark:group-focus-within:text-white transition-colors" />
+                            <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-2 group-focus-within:text-black dark:group-focus-within:text-white transition-colors" />
                         </div>
 
                         <div className="relative" ref={filterRef}>
@@ -340,7 +341,7 @@ export const SongList: React.FC<SongListProps> = ({
                 </div>
 
                 {/* List */}
-                <div className="space-y-2"> {/* Reduced vertical spacing */}
+                <div className="">
                     {listItems.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-64 text-zinc-500 space-y-4 border border-dashed border-zinc-200 dark:border-white/5 rounded-2xl bg-zinc-50 dark:bg-white/[0.02]">
                             <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-white/5 flex items-center justify-center">
@@ -537,7 +538,7 @@ const SongItem: React.FC<SongItemProps> = ({
                     }
                 }, 0);
             }}
-            className={`group flex items-center gap-2 p-1.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-white/[0.02] transition-all cursor-pointer border ${isSelected ? 'bg-zinc-50 dark:bg-white/[0.02] border-zinc-200 dark:border-white/10' : 'border-transparent bg-transparent'} ${song.audioUrl && !song.isGenerating ? 'cursor-grab active:cursor-grabbing' : ''}`}
+            className={`group flex items-start gap-2 px-3 py-2 border border-zinc-200/10 dark:border-zinc-700/50 rounded-lg mb-1.5 hover:bg-white/[0.03] transition-colors cursor-pointer ${isSelected ? 'bg-zinc-50 dark:bg-white/[0.02]' : ''} ${song.audioUrl && !song.isGenerating ? 'cursor-grab active:cursor-grabbing' : ''}`}
         >
             {isSelectionMode && (
                 <button
@@ -558,7 +559,7 @@ const SongItem: React.FC<SongItemProps> = ({
             )}
 
             {/* Cover Art */}
-            <div className="relative w-10 h-10 flex-shrink-0 rounded-md bg-zinc-200 dark:bg-zinc-800 overflow-hidden shadow-sm group/image">
+            <div className="relative w-11 h-11 flex-shrink-0 self-start rounded-md bg-zinc-200 dark:bg-zinc-800 overflow-hidden group/image">
                 {/* Use gradient fallback if no coverUrl or image fails to load */}
                 {(!song.coverUrl || imageError) ? (
                     <AlbumCover seed={song.id || song.title} size="full" className={`w-full h-full ${song.isGenerating ? 'opacity-20 blur-sm' : 'opacity-100'}`} />
@@ -610,7 +611,7 @@ const SongItem: React.FC<SongItemProps> = ({
 
             {/* Content */}
             <div className="flex-1 min-w-0 flex flex-col justify-between">
-                <div className="space-y-0.5">
+                <div className="space-y-0">
                     <div className="flex items-center gap-2">
                         {isEditingTitle && isOwner ? (
                             <input
@@ -625,7 +626,7 @@ const SongItem: React.FC<SongItemProps> = ({
                             />
                         ) : (
                             <h3
-                                className={`font-medium text-xs truncate ${isCurrent ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-900 dark:text-white'} ${isOwner && !song.isGenerating ? 'cursor-pointer hover:underline' : ''}`}
+                                className={`font-medium text-[11px] truncate ${isCurrent ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-900 dark:text-white'} ${isOwner && !song.isGenerating ? 'cursor-pointer hover:underline' : ''}`}
                                 onClick={(e) => {
                                     if (isOwner && !song.isGenerating) {
                                         e.stopPropagation();
@@ -681,9 +682,9 @@ const SongItem: React.FC<SongItemProps> = ({
                     )}
                 </div>
 
-                {/* Actions Row - Hidden while generating */}
+                {/* Actions Row - Hidden while generating, show on hover */}
                 {!song.isGenerating && (
-                    <div className="flex items-center gap-0.5 pt-1">
+                    <div className="flex items-center gap-0.5 pt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                             className={`flex items-center gap-0.5 px-2 py-1 rounded-full hover:bg-white/5 transition-colors ${isLiked ? 'text-pink-600 dark:text-pink-500 bg-pink-100 dark:bg-pink-500/10' : 'text-zinc-400 hover:text-black dark:hover:text-white'}`}
                             onClick={(e) => { e.stopPropagation(); onToggleLike(); }}

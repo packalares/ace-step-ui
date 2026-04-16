@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, Download, Check } from 'lucide-react';
+import { PageLayout } from './ui';
 import { EditableSlider } from './EditableSlider';
 import { useAuth } from '../context/AuthContext';
 import { DIT_MODELS, LM_MODELS, LYRICS_MODELS } from '../data/models';
@@ -420,13 +421,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
     : Object.keys(DIT_MODELS).map(name => ({ name, is_active: false, is_preloaded: false }));
 
   return (
-    <div className="h-full w-full flex flex-col bg-zinc-50 dark:bg-suno-panel overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 scrollbar-hide pb-24">
-        {/* Page Header */}
-        <div>
-          <h1 className="text-lg font-bold text-zinc-900 dark:text-white">Settings</h1>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Configure models, generation defaults, and LM parameters</p>
-        </div>
+    <PageLayout title="Settings" subtitle="Configure models and generation defaults">
+      <div className="space-y-3">
 
         {/* ===== DiT MODELS ===== */}
         <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
@@ -767,7 +763,129 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onNavigate }) => {
             </div>
           </div>
         </div>
+        {/* ===== GPU MANAGEMENT ===== */}
+        <div className="bg-white dark:bg-suno-card rounded-xl border border-zinc-200 dark:border-white/5">
+          <div className="px-3 py-2.5 bg-zinc-50 dark:bg-white/5 border-b border-zinc-100 dark:border-white/5 rounded-t-xl">
+            <h2 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">GPU Management</h2>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">Manage GPU memory and auto-unload</p>
+          </div>
+          <div className="p-3 space-y-3">
+            <GpuSection token={token} />
+          </div>
+        </div>
+
       </div>
-    </div>
+    </PageLayout>
+  );
+};
+
+// --- GPU Management Section ---
+const GpuSection: React.FC<{ token: string | null }> = ({ token }) => {
+  const [gpuStatus, setGpuStatus] = React.useState<any>(null);
+  const [unloading, setUnloading] = React.useState(false);
+  const [autoMinutes, setAutoMinutes] = React.useState(0);
+
+  const fetchStatus = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/generate/gpu/status');
+      if (res.ok) setGpuStatus(await res.json());
+    } catch {}
+  }, []);
+
+  React.useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 15000);
+    return () => clearInterval(interval);
+  }, [fetchStatus]);
+
+  React.useEffect(() => {
+    if (gpuStatus?.autoUnloadMinutes !== undefined) {
+      setAutoMinutes(gpuStatus.autoUnloadMinutes);
+    }
+  }, [gpuStatus?.autoUnloadMinutes]);
+
+  const handleUnload = async () => {
+    if (!token) return;
+    if (!confirm('This will unload all GPU models. Any running generation will fail. Continue?')) return;
+    setUnloading(true);
+    try {
+      const res = await fetch('/api/generate/gpu/unload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) alert(data.error || 'Unload failed');
+      else fetchStatus();
+    } catch (err) {
+      alert('Unload failed');
+    } finally {
+      setUnloading(false);
+    }
+  };
+
+  const handleAutoUnload = async (minutes: number) => {
+    if (!token) return;
+    setAutoMinutes(minutes);
+    try {
+      await fetch('/api/generate/gpu/auto-unload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ minutes }),
+      });
+    } catch {}
+  };
+
+  const inv = gpuStatus?.inventory;
+  const loadedDit = inv?.models?.find((m: any) => m.is_loaded)?.name || 'None';
+  const loadedLm = inv?.loaded_lm_model || 'None';
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-zinc-50 dark:bg-zinc-800/60 rounded-lg px-3 py-2">
+          <span className="text-[10px] text-zinc-500 block">DiT Model</span>
+          <span className="text-[11px] font-medium text-zinc-900 dark:text-white">{loadedDit}</span>
+        </div>
+        <div className="bg-zinc-50 dark:bg-zinc-800/60 rounded-lg px-3 py-2">
+          <span className="text-[10px] text-zinc-500 block">LM Model</span>
+          <span className="text-[11px] font-medium text-zinc-900 dark:text-white">{loadedLm}</span>
+        </div>
+        <div className="bg-zinc-50 dark:bg-zinc-800/60 rounded-lg px-3 py-2">
+          <span className="text-[10px] text-zinc-500 block">ACE-Step</span>
+          <span className={`text-[11px] font-medium ${gpuStatus?.aceStepRunning ? 'text-green-400' : 'text-red-400'}`}>
+            {gpuStatus?.aceStepRunning ? 'Running' : 'Stopped'}
+          </span>
+        </div>
+        <div className="bg-zinc-50 dark:bg-zinc-800/60 rounded-lg px-3 py-2">
+          <span className="text-[10px] text-zinc-500 block">Idle Time</span>
+          <span className="text-[11px] font-medium text-zinc-900 dark:text-white">{gpuStatus?.idleMinutes ?? '?'} min</span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400" title="Automatically unload GPU models after idle time">Auto-unload after</span>
+          <select
+            value={autoMinutes}
+            onChange={(e) => handleAutoUnload(Number(e.target.value))}
+            className="ml-2 bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1 text-[11px] text-zinc-900 dark:text-white focus:outline-none cursor-pointer"
+          >
+            <option value={0}>Disabled</option>
+            <option value={5}>5 min</option>
+            <option value={15}>15 min</option>
+            <option value={30}>30 min</option>
+            <option value={60}>1 hour</option>
+            <option value={120}>2 hours</option>
+          </select>
+        </div>
+        <button
+          onClick={handleUnload}
+          disabled={unloading || !gpuStatus?.aceStepRunning}
+          className="px-3 py-1.5 text-[11px] font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {unloading ? 'Unloading...' : 'Unload GPU'}
+        </button>
+      </div>
+    </>
   );
 };
