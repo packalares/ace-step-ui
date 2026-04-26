@@ -66,6 +66,7 @@ export const TrainingPanel: React.FC = () => {
     category: selectedCategory,
     subType: selectedSubType,
     config: categoryConfig,
+    allInstrumental: derivedAllInstrumental,
     setCategory,
     setSubType,
     buildOutputDir,
@@ -100,10 +101,23 @@ export const TrainingPanel: React.FC = () => {
     datasetName: 'my_lora_dataset',
     customTag: '',
     tagPosition: 'replace',
+    // NOTE: this default is overridden whenever a category is picked — see
+    // the useEffect just below that mirrors the hook's derivedAllInstrumental.
     allInstrumental: true,
     genreRatio: 0,
   });
   const [datasetStatus, setDatasetStatus] = useState('');
+
+  // Mirror the category-derived allInstrumental flag onto datasetSettings.
+  // Voice / Genre / Mood / Producer / Groove → false (samples have vocals).
+  // Instrument / Drum-component / Instrumental → true (no lyrics expected).
+  // Without this, the build-dataset endpoint stamps every sample with
+  // `lyrics: "[Instrumental]"`, which is wrong for voice-clone training.
+  useEffect(() => {
+    setDatasetSettings(prev => (prev.allInstrumental === derivedAllInstrumental
+      ? prev
+      : { ...prev, allInstrumental: derivedAllInstrumental }));
+  }, [derivedAllInstrumental]);
 
   // Dataset table state
   const [dataframeHeaders, setDataframeHeaders] = useState<string[]>([]);

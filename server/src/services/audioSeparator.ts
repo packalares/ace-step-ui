@@ -44,7 +44,13 @@ const CLI_BINARY = process.env.AUDIO_SEPARATOR_BINARY ?? 'audio-separator';
 // stderr as e.g.  "Separating: 42%|████" — match either stream.
 const PROGRESS_RE = /(\d+)%\|/;
 
-function buildArgs(input: string, model: string, outputDir: string, extra?: Record<string, unknown>): string[] {
+function buildArgs(
+  input: string,
+  model: string,
+  outputDir: string,
+  extra?: Record<string, unknown>,
+  keepStems?: string[],
+): string[] {
   const args = [
     input,
     '--model_filename', model,
@@ -53,6 +59,16 @@ function buildArgs(input: string, model: string, outputDir: string, extra?: Reco
     '--model_file_dir', MODEL_DIR,
     '--use_autocast',
   ];
+
+  // When the caller wants exactly ONE stem out (e.g. voice-clone training
+  // wants only the vocal stem), use audio-separator's --single_stem flag
+  // so the CLI never writes the other stems. This avoids a race where the
+  // post-process delete loop scanned the dir before all stems were flushed.
+  if (keepStems && keepStems.length === 1) {
+    const stemName = keepStems[0];
+    const titled = stemName.charAt(0).toUpperCase() + stemName.slice(1).toLowerCase();
+    args.push('--single_stem', titled);
+  }
 
   if (extra) {
     for (const [key, val] of Object.entries(extra)) {
@@ -80,9 +96,10 @@ function runOnce(
   extra: Record<string, unknown> | undefined,
   onStdout?: (line: string) => void,
   onProgress?: (msg: string) => void,
+  keepStems?: string[],
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = buildArgs(input, model, outputDir, extra);
+    const args = buildArgs(input, model, outputDir, extra, keepStems);
     const proc = spawn(CLI_BINARY, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     let lastPct = -1;
@@ -204,11 +221,15 @@ export async function separateStems(opts: SeparateOptions): Promise<SeparateResu
     onProgress?.(`(${i + 1}/${inputPaths.length}) ${path.basename(input)}`);
     onStdout?.(`[audio-separator] separating ${input} with ${model}`);
 
-    await runOnce(input, model, outputDir, extraArgs, onStdout, onProgress);
+    await runOnce(input, model, outputDir, extraArgs, onStdout, onProgress, keepStems);
 
+    // Brief settle to let audio-separator's filesystem writes flush before scanning.
+    await new Promise(r => setTimeout(r, 250));
     const stems = await findStemsFor(outputDir, inputBasename);
 
-    // Filter / cleanup based on keepStems.
+    // Filter / cleanup based on keepStems. With --single_stem (above) the
+    // unwanted stems are never written, so this is now mostly a safety net
+    // for multi-stem keep cases.
     let kept = stems;
     if (keepStems && keepStems.length > 0) {
       kept = stems.filter(s => matchesKeepList(s.name, keepStems));

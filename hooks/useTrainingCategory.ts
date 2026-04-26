@@ -82,6 +82,26 @@ export function resolveCategory(
 }
 
 /**
+ * Whether the dataset for this category should be flagged as all-instrumental.
+ *
+ * The build-dataset endpoint uses this flag to set every sample's
+ * `lyrics: "[Instrumental]"` — wrong for voice-clone training, right for
+ * pure instrumental categories. Derive instead of asking the user.
+ *
+ *   - preprocessing keeps "vocals" → has vocals → false
+ *   - preprocessing disabled (full mix) → assume vocals present → false
+ *   - keepStems = drums/bass/guitar/piano/synth/other/instrumental → true
+ */
+export function deriveAllInstrumental(resolved: ResolvedCategoryConfig | null): boolean {
+  if (!resolved) return false;
+  const pre = resolved.preprocessing;
+  if (!pre || pre.enabled === false) return false;
+  const keep = pre.keepStems ?? [];
+  if (keep.length === 0) return false;
+  return !keep.some(k => k.toLowerCase() === 'vocals');
+}
+
+/**
  * Build the full lora_output path for a resolved category.
  * Format: `${outputRoot}/${outputSubdir}/${datasetName}` (datasetName optional).
  */
@@ -112,6 +132,8 @@ export interface UseTrainingCategoryReturn {
   config: ResolvedCategoryConfig | null;
   /** Merged training defaults (alias of `config?.training`). */
   defaults: TrainingDefaults | null;
+  /** Derived: whether dataset.allInstrumental should default to true for this category. */
+  allInstrumental: boolean;
   setCategory: (id: TrainingCategoryId | null) => void;
   setSubType: (id: string | null) => void;
   buildOutputDir: (datasetName?: string | null) => string;
@@ -170,6 +192,7 @@ export function useTrainingCategory(): UseTrainingCategoryReturn {
     subType,
     config,
     defaults: config?.training ?? null,
+    allInstrumental: deriveAllInstrumental(config),
     setCategory,
     setSubType,
     buildOutputDir: buildOutputDirCb,
