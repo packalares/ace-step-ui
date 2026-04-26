@@ -811,3 +811,129 @@ export const trainingApi = {
   importDataset: (datasetType: string, token: string): Promise<{ status: string }> =>
     api('/api/training/import-dataset', { method: 'POST', body: { datasetType }, token }),
 };
+
+// TTS API (IndexTTS2 voice cloning)
+export interface TtsJobResult {
+  audioUrl: string;
+  durationSeconds: number;
+}
+
+export interface TtsJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  progress: number;
+  log: string[];
+  result?: TtsJobResult;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const ttsApi = {
+  // Submit a clone job. The FormData should contain refAudio + text plus
+  // any optional fields (emoAudio, emoAlpha, emoText, emoVector, fp16,
+  // seed, intervalSilence). Returns the jobId; poll status() until done.
+  clone: async (form: FormData, token: string): Promise<{ jobId: string }> => {
+    const response = await fetch(`${API_BASE}/api/tts/clone`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'TTS clone failed' }));
+      throw new Error(error.details || error.error || 'TTS clone failed');
+    }
+    return response.json();
+  },
+
+  status: (jobId: string, token: string): Promise<TtsJob> =>
+    api(`/api/tts/status/${jobId}`, { token }),
+};
+
+// Stem extraction (replaces the old browser-side Demucs popup).
+export interface StemFile {
+  name: string;       // e.g. "Vocals", "Drums"
+  path: string;       // server-side path
+  url?: string;       // public URL when served via /audio/stems/...
+}
+
+export interface StemJobOutput {
+  input: string;
+  stems: StemFile[];
+}
+
+export interface StemJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  progress: number;
+  current: number;
+  total: number;
+  log: string[];
+  result?: { outputs: StemJobOutput[]; totalDurationMs: number };
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const stemsApi = {
+  // Ad-hoc per-song stem extraction. Returns a jobId; poll songStatus().
+  extractForSong: async (
+    songId: string,
+    model: string,
+    token: string,
+  ): Promise<{ jobId: string; songId: string; model: string }> => {
+    const response = await fetch(`${API_BASE}/api/songs/${songId}/extract-stems`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ model }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Stem extraction failed' }));
+      throw new Error(error.error || 'Stem extraction failed');
+    }
+    return response.json();
+  },
+
+  songStatus: (songId: string, jobId: string, token: string): Promise<StemJob> =>
+    api(`/api/songs/${songId}/extract-stems-status?jobId=${encodeURIComponent(jobId)}`, { token }),
+
+  // Training-data preprocessing (multi-file batch). Used by TrainingPanel.
+  // Server resolves input/output dirs from datasetName so the frontend
+  // doesn't deal in absolute paths. Returns the new `outputDatasetName`
+  // (suffix `_stems`) which the caller should then pass to buildDataset.
+  preprocessForTraining: async (
+    body: {
+      datasetName: string;
+      category: string;
+      subType?: string | null;
+      preprocessing: {
+        model: string;
+        keepStems?: string[];
+        chain?: string[];
+        extraArgs?: Record<string, unknown>;
+      };
+    },
+    token: string,
+  ): Promise<{
+    jobId: string;
+    total: number;
+    category: string;
+    subType?: string | null;
+    outputDatasetName: string;
+    outputDir: string;
+  }> => {
+    const response = await fetch(`${API_BASE}/api/training/preprocess-stems`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Preprocessing failed' }));
+      throw new Error(error.error || 'Preprocessing failed');
+    }
+    return response.json();
+  },
+
+  preprocessStatus: (jobId: string, token: string): Promise<StemJob> =>
+    api(`/api/training/preprocess-stems-status?jobId=${encodeURIComponent(jobId)}`, { token }),
+};

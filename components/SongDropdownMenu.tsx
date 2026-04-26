@@ -123,14 +123,12 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
     };
 
     const handleExtractStems = () => {
-        if (!song.audioUrl) return;
-        const baseUrl = window.location.port === '3000'
-            ? `${window.location.protocol}//${window.location.hostname}:3001`
-            : window.location.origin;
-        const audioUrl = song.audioUrl.startsWith('http')
-            ? song.audioUrl
-            : `${baseUrl}${song.audioUrl}`;
-        window.open(`${baseUrl}/demucs-web/?audioUrl=${encodeURIComponent(audioUrl)}`, '_blank');
+        if (!song.id) return;
+        // Server-side audio-separator runs on the pod GPU. The modal listens
+        // for this event at the App level (see components/StemExtractionModal).
+        window.dispatchEvent(new CustomEvent('songstudio:extract-stems', {
+            detail: { songId: song.id, songTitle: song.title },
+        }));
         onClose();
     };
 

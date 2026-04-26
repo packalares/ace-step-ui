@@ -66,6 +66,18 @@ RUN pip install torchcodec==0.10.0
 # Lyrics LLM (llama-cpp-python for GGUF model inference)
 RUN pip install llama-cpp-python
 
+# Server-side stem extraction (replaces browser-only Demucs at server/public/demucs-web).
+# audio-separator bundles BS/Mel-Roformer + Demucs + MDX in one CLI/Python API.
+RUN pip install --no-cache-dir "audio-separator[gpu]==0.44.1"
+
+# Pre-warm checkpoints into the image so first separation is fast.
+# Models live under AUDIO_SEPARATOR_MODEL_DIR; the Node server reads from there.
+ENV AUDIO_SEPARATOR_MODEL_DIR=/app/.audio-separator-models
+RUN mkdir -p ${AUDIO_SEPARATOR_MODEL_DIR} \
+ && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m MelBandRoformer.ckpt \
+ && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m model_bs_roformer_ep_317_sdr_12.9755.ckpt \
+ && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m htdemucs_6s.yaml
+
 # Patch: decouple api_server from Gradio imports
 RUN cd /app/ACE-Step-1.5 && \
     sed -i 's|from acestep.ui.gradio.events.results_handlers import _build_generation_info|from acestep.ui.gradio.events.results.generation_info import _build_generation_info|' acestep/api_server.py && \

@@ -2,12 +2,15 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import {
   Play, Square, Download, FolderOpen, Save, Loader2,
   Edit3, Upload, X, Volume2, FileAudio, Zap,
-  Wand2, Check,
+  Wand2, Check, Layers, Info,
 } from 'lucide-react';
-import { PageLayout, Card, CardHeader, Button } from './ui';
+import { PageLayout, Card, CardHeader, Button, Badge } from './ui';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
-import { trainingApi, getTrainingAudioUrl, TrainingSample, DatasetSettings } from '../services/api';
+import { trainingApi, stemsApi, getTrainingAudioUrl, TrainingSample, DatasetSettings } from '../services/api';
+import { TrainingCategorySelector } from './TrainingCategorySelector';
+import { useTrainingCategory } from '../hooks/useTrainingCategory';
+import type { ResolvedCategoryConfig, TrainingCategoryId } from '../types/training';
 
 interface DataframeRow {
   [key: string]: unknown;
@@ -29,8 +32,10 @@ const LANGUAGES = [
 
 const TIME_SIGS = ['', '2', '3', '4', '6', 'N/A'];
 
-// Pipeline step definitions
+// Pipeline step definitions — Step 0 (category) is rendered separately as a
+// gate; the remaining 5 steps form the actual training wizard.
 const PIPELINE_STEPS = [
+  { key: 'category', label: 'Category', icon: Layers, num: 0 },
   { key: 'upload', label: 'Upload', icon: Upload, num: 1 },
   { key: 'label', label: 'Label', icon: Wand2, num: 2 },
   { key: 'preprocess', label: 'Preprocess', icon: Zap, num: 3 },
@@ -40,15 +45,41 @@ const PIPELINE_STEPS = [
 
 type StepKey = typeof PIPELINE_STEPS[number]['key'];
 
+// Build a slug-safe dataset name suggestion from category id + timestamp.
+function suggestDatasetName(categoryId: TrainingCategoryId, subTypeId: string | null): string {
+  const slug = subTypeId ? `${categoryId}_${subTypeId}` : categoryId;
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[:T]/g, '-')
+    .replace(/\..*$/, '')
+    .replace(/-/g, '');
+  return `${slug}_${stamp}`;
+}
+
 export const TrainingPanel: React.FC = () => {
   const { token } = useAuth();
   const { t } = useI18n();
 
-  // Current wizard step
-  const [activeStep, setActiveStep] = useState<StepKey>('upload');
+  // Category-driven state (Step 0).
+  const {
+    categories,
+    category: selectedCategory,
+    subType: selectedSubType,
+    config: categoryConfig,
+    setCategory,
+    setSubType,
+    buildOutputDir,
+    outputRoot,
+  } = useTrainingCategory();
 
-  // Completed steps
-  const [completedSteps, setCompletedSteps] = useState<Set<StepKey>>(new Set());
+  // Current wizard step. If a category was already chosen on a previous visit
+  // (persisted to localStorage), skip Step 0 and start at Upload.
+  const [activeStep, setActiveStep] = useState<StepKey>(() => (selectedCategory ? 'upload' : 'category'));
+
+  // Completed steps. Category counts as complete once a category id is set.
+  const [completedSteps, setCompletedSteps] = useState<Set<StepKey>>(() => {
+    return new Set<StepKey>(selectedCategory ? ['category'] : []);
+  });
 
   // Upload state
   const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
@@ -178,6 +209,66 @@ export const TrainingPanel: React.FC = () => {
     }
   }, []);
 
+  // Apply category defaults whenever the resolved (category + sub-type) config
+  // changes. Only patches fields the user hasn't manually customised away from
+  // the previous category's defaults — but to keep the UX predictable we just
+  // overwrite the relevant fields when the category changes. The user can
+  // tweak afterwards.
+  const lastAppliedCategoryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!categoryConfig) return;
+    const key = `${categoryConfig.id}::${categoryConfig.subTypeId ?? ''}`;
+    if (lastAppliedCategoryRef.current === key) return;
+    lastAppliedCategoryRef.current = key;
+
+    // Patch training params from JSON defaults.
+    const d = categoryConfig.training;
+    setTrainingParams(prev => ({
+      ...prev,
+      rank: d.rank,
+      alpha: d.alpha,
+      dropout: d.dropout,
+      learningRate: d.learningRate,
+      epochs: d.epochs,
+      batchSize: d.batchSize,
+      gradientAccumulation: d.gradientAccumulation,
+      saveEvery: d.saveEvery,
+      outputDir: buildOutputDir(prev.outputDir.split('/').filter(Boolean).pop() || null),
+    }));
+
+    // Patch auto-label toggles from JSON defaults.
+    setSkipMetas(categoryConfig.autoLabel.skipMetas);
+    setFormatLyrics(categoryConfig.autoLabel.formatLyrics);
+    setTranscribeLyrics(categoryConfig.autoLabel.transcribeLyrics);
+
+    // Suggest a dataset name based on category id (only if the user is still on
+    // the placeholder default).
+    setUploadDatasetName(prev => {
+      if (!prev || prev === 'my_lora_dataset' || prev.startsWith(`${categoryConfig.id}_`) || prev.startsWith(`${categoryConfig.id}/`)) {
+        return suggestDatasetName(categoryConfig.id, categoryConfig.subTypeId);
+      }
+      return prev;
+    });
+
+    // Apply the customTag/tagPosition from JSON to the live dataset settings
+    // so the eventual save-dataset call captures it.
+    setDatasetSettings(prev => ({
+      ...prev,
+      customTag: categoryConfig.autoLabel.customTag,
+      tagPosition: categoryConfig.autoLabel.tagPosition,
+    }));
+  }, [categoryConfig, buildOutputDir]);
+
+  // Whenever the dataset name changes (and a category is selected), update the
+  // training output dir to point inside `${outputRoot}/${outputSubdir}/${name}`.
+  useEffect(() => {
+    if (!categoryConfig) return;
+    const path = buildOutputDir(uploadDatasetName);
+    setTrainingParams(prev => (prev.outputDir === path ? prev : { ...prev, outputDir: path }));
+    setExportOutputDir(path);
+    setExportPath(`${path}/final`);
+  }, [categoryConfig, uploadDatasetName, buildOutputDir]);
+
   const populateSampleFields = (sample: TrainingSample) => {
     setEditCaption(sample.caption || '');
     setEditGenre(sample.genre || '');
@@ -295,16 +386,81 @@ export const TrainingPanel: React.FC = () => {
     setQueuedFiles(prev => prev.filter((_, i) => i !== idx));
   }, []);
 
-  // === Upload + Build Dataset ===
+  // === Per-category UI visibility ===========================================
+  // The category config drives which sample-editor fields make sense.
+  //   - Lyrics: only when the category's preprocessing keeps the vocal stem,
+  //     or auto-labelling transcribes lyrics, or the category is a full-mix
+  //     (no preprocessing) one like genre/mood/producer.
+  //   - BPM / Key / Language row: hidden when autoLabel.skipMetas is true
+  //     (voice / instrumental track / drum component / mood / groove).
+  const showLyricsField = useMemo(() => {
+    if (!categoryConfig) return true;
+    const keep = categoryConfig.preprocessing?.keepStems ?? [];
+    if (keep.includes('vocals')) return true;
+    if (categoryConfig.autoLabel?.transcribeLyrics) return true;
+    if (categoryConfig.preprocessing?.enabled === false) return true;
+    return false;
+  }, [categoryConfig]);
+
+  const showMetadataRow = useMemo(() => {
+    if (!categoryConfig) return true;
+    return !categoryConfig.autoLabel?.skipMetas;
+  }, [categoryConfig]);
+
+  // === Upload + (optional) Stem Extraction + Build Dataset ===
   const handleUploadAndBuild = useCallback(async () => {
     if (!token || queuedFiles.length === 0) return;
     setUploading(true);
     setUploadStatus('Uploading files...');
     try {
       await trainingApi.uploadAudio(queuedFiles, uploadDatasetName, token);
-      setUploadStatus(`Uploaded ${queuedFiles.length} files. Building dataset...`);
+
+      // If the selected category needs stem extraction (Voice / Per-Instrument /
+      // Drum Component / Instrumental Track), run audio-separator on the pod
+      // before building the dataset. The build step then reads from the
+      // sibling `_stems` folder rather than the raw uploads.
+      let buildDatasetName = uploadDatasetName;
+      const pre = categoryConfig?.preprocessing;
+      if (pre?.enabled && pre.model && selectedCategory) {
+        setUploadStatus(`Extracting stems with ${pre.model}…`);
+        const job = await stemsApi.preprocessForTraining({
+          datasetName: uploadDatasetName,
+          category: selectedCategory,
+          subType: selectedSubType ?? null,
+          preprocessing: {
+            model: pre.model,
+            keepStems: pre.keepStems,
+            chain: pre.chain,
+            extraArgs: pre.extraArgs,
+          },
+        }, token);
+        buildDatasetName = job.outputDatasetName;
+
+        // Poll until terminal — same 2 s cadence as the modal.
+        // Cap at 60 minutes so a stuck job eventually surfaces.
+        const deadline = Date.now() + 60 * 60 * 1000;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          if (Date.now() > deadline) {
+            throw new Error('Stem extraction timed out after 60 minutes');
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+          const status = await stemsApi.preprocessStatus(job.jobId, token);
+          setUploadStatus(
+            `Extracting stems: ${status.progress}% (${status.current}/${status.total})`,
+          );
+          if (status.status === 'completed') break;
+          if (status.status === 'failed') {
+            throw new Error(status.error || 'Stem extraction failed');
+          }
+        }
+        setUploadStatus('Stems ready. Building dataset…');
+      } else {
+        setUploadStatus(`Uploaded ${queuedFiles.length} files. Building dataset…`);
+      }
+
       const result = await trainingApi.buildDataset({
-        datasetName: uploadDatasetName,
+        datasetName: buildDatasetName,
         customTag: datasetSettings.customTag,
         tagPosition: datasetSettings.tagPosition,
         allInstrumental: datasetSettings.allInstrumental,
@@ -332,7 +488,8 @@ export const TrainingPanel: React.FC = () => {
     } finally {
       setUploading(false);
     }
-  }, [token, queuedFiles, uploadDatasetName, datasetSettings, markStep, advanceToNext]);
+  }, [token, queuedFiles, uploadDatasetName, datasetSettings, markStep, advanceToNext,
+      categoryConfig, selectedCategory, selectedSubType]);
 
   // === Load existing dataset ===
   const handleLoadDataset = useCallback(async () => {
@@ -480,7 +637,11 @@ export const TrainingPanel: React.FC = () => {
         tagPosition: datasetSettings.tagPosition,
         allInstrumental: datasetSettings.allInstrumental,
         genreRatio: datasetSettings.genreRatio,
-      }, token);
+        // Forward category metadata so the backend can record it. The backend
+        // agent owns the schema; the request body is non-strict on the server.
+        category: selectedCategory,
+        subType: selectedSubType,
+      } as any, token);
       setSaveStatus(result.status as string);
       if (result.path) setSavePath(result.path);
       markStep('label');
@@ -490,9 +651,16 @@ export const TrainingPanel: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [token, savePath, datasetSettings, t, markStep, advanceToNext]);
+  }, [token, savePath, datasetSettings, selectedCategory, selectedSubType, t, markStep, advanceToNext]);
 
   // === Preprocess ===
+  // NOTE: This is the *tensor* preprocessing step (turns labeled audio into
+  // ACE-Step training tensors), not stem extraction. Stem extraction is a
+  // separate optional step driven by the selected category's preprocessing
+  // config; it should run BEFORE Build Dataset (so the dataset reads
+  // already-isolated stems). That integration is staged for a follow-up
+  // iteration — the API + modal already exist (see services/api.ts
+  // → stemsApi.preprocessForTraining + components/StemExtractionModal).
   const handlePreprocess = useCallback(async () => {
     if (!token) return;
     setPreprocessing(true);
@@ -644,6 +812,19 @@ export const TrainingPanel: React.FC = () => {
     }
   }, [token, exportPath, exportOutputDir, t, markStep]);
 
+  // Mark category step complete whenever a valid selection exists.
+  useEffect(() => {
+    if (selectedCategory) {
+      setCompletedSteps(prev => prev.has('category') ? prev : new Set([...prev, 'category']));
+    }
+  }, [selectedCategory]);
+
+  const handleConfirmCategory = useCallback(() => {
+    if (!selectedCategory) return;
+    markStep('category');
+    advanceToNext('category');
+  }, [selectedCategory, markStep, advanceToNext]);
+
   // === Loss chart ===
   const lossChartSvg = useMemo(() => {
     if (!trainingMetrics) return null;
@@ -679,8 +860,21 @@ export const TrainingPanel: React.FC = () => {
 
   const activeStepIdx = PIPELINE_STEPS.findIndex(s => s.key === activeStep);
 
+  const headerActions = categoryConfig ? (
+    <div className="flex items-center gap-1.5">
+      <Badge variant="pink">{categoryConfig.displayName}</Badge>
+      <button
+        type="button"
+        onClick={() => goToStep('category')}
+        className="text-[10px] text-zinc-500 dark:text-zinc-400 hover:text-pink-400 underline"
+      >
+        change
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <PageLayout title={t('loraTraining')} subtitle="Train a style adapter step by step">
+    <PageLayout title={t('loraTraining')} subtitle="Train a style adapter step by step" actions={headerActions}>
       <div className="flex h-full min-h-0">
         {/* Left: Vertical Step Navigation */}
         <div className="w-[160px] flex-shrink-0 border-r border-zinc-800/50 pr-3 space-y-1 pt-1">
@@ -714,9 +908,38 @@ export const TrainingPanel: React.FC = () => {
         {/* Right: Step Content */}
         <div className="flex-1 overflow-y-auto pl-4 space-y-2">
 
+        {/* ===== STEP 0: CATEGORY ===== */}
+        {activeStep === 'category' && (
+          <>
+            <Section title="Step 0 · Choose what you're training">
+              <TrainingCategorySelector
+                categories={categories}
+                selectedCategory={selectedCategory}
+                selectedSubType={selectedSubType}
+                onSelectCategory={(id) => setCategory(id)}
+                onSelectSubType={(id) => setSubType(id)}
+              />
+              {categoryConfig && (
+                <div className="mt-3 pt-3 border-t border-zinc-800/50 space-y-2">
+                  <CategorySummary config={categoryConfig} outputRoot={outputRoot} />
+                  <div className="flex justify-end">
+                    <Button variant="primary" onClick={handleConfirmCategory}>
+                      Continue with {categoryConfig.displayName}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Section>
+          </>
+        )}
+
         {/* ===== STEP 1: UPLOAD ===== */}
         {activeStep === 'upload' && (
           <>
+            {categoryConfig && (
+              <DatasetGuidance config={categoryConfig} />
+            )}
+
             <Section title="Upload Audio Files">
               <div
                 onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
@@ -874,28 +1097,32 @@ export const TrainingPanel: React.FC = () => {
                       <input type="text" value={editGenre} onChange={e => setEditGenre(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
                     </div>
                   </div>
-                  {/* Row 2: Lyrics (full width, shorter) */}
-                  <div>
-                    <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Lyrics</label>
-                    <textarea value={editLyrics} onChange={e => setEditLyrics(e.target.value)} rows={2} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500 resize-none h-16" />
-                  </div>
-                  {/* Row 3: BPM + Key + Language in 3 columns */}
-                  <div className="grid grid-cols-3 gap-3">
+                  {/* Row 2: Lyrics (full width, shorter) — hidden for instrumental-style categories */}
+                  {showLyricsField && (
                     <div>
-                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">BPM</label>
-                      <input type="number" value={editBpm} onChange={e => setEditBpm(parseInt(e.target.value) || 0)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Lyrics</label>
+                      <textarea value={editLyrics} onChange={e => setEditLyrics(e.target.value)} rows={2} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500 resize-none h-16" />
                     </div>
-                    <div>
-                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Key</label>
-                      <input type="text" value={editKey} onChange={e => setEditKey(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                  )}
+                  {/* Row 3: BPM + Key + Language — hidden when category sets autoLabel.skipMetas */}
+                  {showMetadataRow && (
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">BPM</label>
+                        <input type="number" value={editBpm} onChange={e => setEditBpm(parseInt(e.target.value) || 0)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Key</label>
+                        <input type="text" value={editKey} onChange={e => setEditKey(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Language</label>
+                        <select value={editLanguage} onChange={e => setEditLanguage(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500">
+                          {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                        </select>
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Language</label>
-                      <select value={editLanguage} onChange={e => setEditLanguage(e.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500">
-                        {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                      </select>
-                    </div>
-                  </div>
+                  )}
                   <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
                     <button onClick={handleSaveSample} disabled={saving} className="px-4 py-2 text-xs bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg font-medium flex items-center gap-1.5 disabled:opacity-50">
                       {saving ? <Loader2 size={14} className="animate-spin" /> : <Edit3 size={14} />}
@@ -927,6 +1154,9 @@ export const TrainingPanel: React.FC = () => {
         {activeStep === 'preprocess' && (
           <>
             <div className="max-w-lg">
+              {categoryConfig?.preprocessing.enabled && (
+                <PreprocessingNotice config={categoryConfig} />
+              )}
               <Section title="Preprocess to Tensors">
                 <p className="text-[11px] text-zinc-500 mb-3">Convert your labeled dataset into training-ready tensors.</p>
                 <div className="space-y-2">
@@ -999,6 +1229,9 @@ export const TrainingPanel: React.FC = () => {
                 <div>
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Output Dir</label>
                   <input type="text" value={trainingParams.outputDir} onChange={e => setTrainingParams(p => ({ ...p, outputDir: e.target.value }))} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-pink-500" />
+                  {categoryConfig && (
+                    <p className="text-[10px] text-zinc-500 mt-1">From category: <span className="font-mono text-zinc-400">{outputRoot}/{categoryConfig.training.outputSubdir}</span></p>
+                  )}
                 </div>
                 <div>
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wide mb-1 block">Resume Checkpoint</label>
@@ -1133,3 +1366,82 @@ const CompactSlider: React.FC<{
     <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(parseFloat(e.target.value))} className="w-full accent-pink-500 h-1" />
   </div>
 );
+
+// Renders a quick summary of the resolved category config — shown beneath the
+// selector once a category is chosen so the user sees what will be applied.
+const CategorySummary: React.FC<{ config: ResolvedCategoryConfig; outputRoot: string }> = ({ config, outputRoot }) => {
+  const { dataset, training, preprocessing } = config;
+  return (
+    <div className="grid grid-cols-2 gap-2 text-[11px]">
+      <div className="bg-zinc-900/40 rounded-lg p-2 border border-white/5">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Dataset target</div>
+        <div className="text-zinc-300">
+          {dataset.minSamples}-{dataset.recommendedSamples} clips, {dataset.minSampleSeconds}-{dataset.maxSampleSeconds}s each
+        </div>
+      </div>
+      <div className="bg-zinc-900/40 rounded-lg p-2 border border-white/5">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Training defaults</div>
+        <div className="text-zinc-300">
+          rank {training.rank} · α {training.alpha} · {training.epochs} steps · lr {training.learningRate}
+        </div>
+      </div>
+      <div className="bg-zinc-900/40 rounded-lg p-2 border border-white/5 col-span-2">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Output path</div>
+        <div className="text-zinc-300 font-mono break-all">{outputRoot}/{training.outputSubdir}/&lt;datasetName&gt;</div>
+      </div>
+      {preprocessing.enabled && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2 col-span-2">
+          <div className="text-[10px] uppercase tracking-wide text-amber-400 mb-1">Preprocessing</div>
+          <div className="text-amber-300">
+            {preprocessing.chain
+              ? `Chained: ${preprocessing.chain.join(' → ')}`
+              : `${preprocessing.model}`}
+            {preprocessing.keepStems.length > 0 && ` · keep [${preprocessing.keepStems.join(', ')}]`}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Card shown above the upload zone with category-specific dataset guidance.
+const DatasetGuidance: React.FC<{ config: ResolvedCategoryConfig }> = ({ config }) => (
+  <div className="rounded-xl border border-pink-500/20 bg-pink-500/5 p-3">
+    <div className="flex items-start gap-2">
+      <Info size={14} className="text-pink-400 mt-0.5 flex-shrink-0" />
+      <div className="space-y-1">
+        <div className="text-xs font-semibold text-pink-300">{config.displayName} dataset</div>
+        <p className="text-[11px] text-zinc-300 leading-relaxed">{config.dataset.instructions}</p>
+        <p className="text-[10px] text-zinc-500">
+          Recommended: {config.dataset.recommendedSamples} clips · {config.dataset.minSampleSeconds}-{config.dataset.maxSampleSeconds}s each (min {config.dataset.minSamples}).
+        </p>
+      </div>
+    </div>
+  </div>
+);
+
+// Notice shown on the Preprocess step when stem extraction is required by
+// the category. The actual preprocessing endpoint is owned by the backend
+// agent (see TODO at handlePreprocess).
+const PreprocessingNotice: React.FC<{ config: ResolvedCategoryConfig }> = ({ config }) => {
+  const { preprocessing } = config;
+  return (
+    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 mb-3">
+      <div className="flex items-start gap-2">
+        <Info size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
+        <div className="space-y-1">
+          <div className="text-xs font-semibold text-amber-300">Stem extraction required</div>
+          <p className="text-[11px] text-zinc-300 leading-relaxed">
+            Before encoding to tensors, samples will be run through stem-extraction so only the relevant stem trains the LoRA.
+          </p>
+          <p className="text-[10px] text-zinc-400 font-mono">
+            {preprocessing.chain
+              ? `chain: ${preprocessing.chain.join(' → ')}`
+              : `model: ${preprocessing.model}`}
+            {preprocessing.keepStems.length > 0 && ` · keep [${preprocessing.keepStems.join(', ')}]`}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};

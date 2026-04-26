@@ -4,6 +4,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../db/pool.js';
 import { authMiddleware, optionalAuthMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { getStorageProvider } from '../services/storage/factory.js';
+import { separateStems } from '../services/audioSeparator.js';
+import { createJob, getJob, updateJob } from '../services/stemJobs.js';
+import { existsSync } from 'fs';
+import { mkdir } from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, '../../public');
 
 const router = Router();
 
@@ -648,6 +658,100 @@ router.delete('/comments/:commentId', authMiddleware, async (req: AuthenticatedR
     console.error('Delete comment error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// --- Ad-hoc stem extraction -------------------------------------------------
+// Replaces the browser-side Demucs popup. Spawns audio-separator on the
+// pod's GPU and returns a job id for client polling. Output stems land in
+// server/public/audio/stems/<songId>/ and are served via the existing /audio
+// static handler.
+
+router.post('/:id/extract-stems', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const songId = req.params.id;
+  const model = (req.body?.model as string) || 'htdemucs_6s.yaml';
+
+  try {
+    const result = await pool.query(
+      `SELECT s.audio_url, s.title FROM songs s WHERE s.id = $1`,
+      [songId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Song not found' });
+    }
+
+    const audioUrl = result.rows[0].audio_url as string | null;
+    if (!audioUrl) {
+      return res.status(404).json({ error: 'Song has no audio' });
+    }
+
+    if (audioUrl.startsWith('s3://')) {
+      // TODO: download from S3 to a temp path before separation.
+      return res.status(501).json({
+        error: 'Stem extraction for S3-stored songs is not yet implemented',
+      });
+    }
+
+    // Local URL like "/audio/foo.wav" → "server/public/audio/foo.wav".
+    const audioPath = audioUrl.startsWith('/')
+      ? path.join(PUBLIC_DIR, audioUrl)
+      : audioUrl;
+
+    if (!existsSync(audioPath)) {
+      return res.status(404).json({ error: `Audio file not found on disk: ${audioPath}` });
+    }
+
+    const outputDir = path.join(PUBLIC_DIR, 'audio', 'stems', songId);
+    await mkdir(outputDir, { recursive: true });
+
+    const job = createJob(1);
+    res.json({ jobId: job.id, songId, model });
+
+    void (async () => {
+      try {
+        updateJob(job.id, { status: 'running' });
+        const stemResult = await separateStems({
+          inputPaths: [audioPath],
+          outputDir,
+          model,
+          onStdout: (line) => {
+            const cur = getJob(job.id);
+            if (!cur) return;
+            updateJob(job.id, { log: [...cur.log, line].slice(-200) });
+          },
+          onProgress: (msg) => {
+            const m = msg.match(/(\d+)\s*%/);
+            if (m) updateJob(job.id, { progress: parseInt(m[1], 10) });
+          },
+        });
+        // Augment each stem with a public URL the frontend can use directly.
+        const augmented = {
+          ...stemResult,
+          outputs: stemResult.outputs.map((out) => ({
+            ...out,
+            stems: out.stems.map((s) => ({
+              ...s,
+              url: `/audio/stems/${songId}/${path.basename(s.path)}`,
+            })),
+          })),
+        };
+        updateJob(job.id, { status: 'completed', progress: 100, current: 1, result: augmented });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        updateJob(job.id, { status: 'failed', error: message });
+      }
+    })();
+  } catch (error) {
+    console.error('Extract stems error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/:id/extract-stems-status', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const jobId = String(req.query.jobId ?? '');
+  const job = getJob(jobId);
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  return res.json(job);
 });
 
 export default router;

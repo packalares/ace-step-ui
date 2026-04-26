@@ -152,4 +152,4 @@ export interface UserProfile {
 }
 
 // Simplified views for ACE-Step UI
-export type View = 'create' | 'library' | 'training' | 'profile' | 'song' | 'playlist' | 'search' | 'news' | 'settings';
+export type View = 'create' | 'library' | 'training' | 'tts' | 'profile' | 'song' | 'playlist' | 'search' | 'news' | 'settings';

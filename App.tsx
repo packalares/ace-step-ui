@@ -21,6 +21,8 @@ import { PlaylistDetail } from './components/PlaylistDetail';
 import { Toast, ToastType } from './components/Toast';
 import { SearchPage } from './components/SearchPage';
 import { TrainingPanel } from './components/TrainingPanel';
+import { TTSPanel } from './components/TTSPanel';
+import { StemExtractionModal } from './components/StemExtractionModal';
 // NewsPage removed
 import { SettingsPage } from './components/SettingsPage';
 import { ConfirmDialog } from './components/ConfirmDialog';
@@ -289,6 +291,8 @@ function AppContent() {
         setCurrentView('search');
       } else if (path === '/settings') {
         setCurrentView('settings');
+      } else if (path === '/tts') {
+        setCurrentView('tts');
       }
     };
 
@@ -1297,6 +1301,9 @@ function AppContent() {
       case 'training':
         return <TrainingPanel />;
 
+      case 'tts':
+        return <TTSPanel />;
+
       case 'settings':
         return (
           <SettingsPage
@@ -1412,6 +1419,8 @@ function AppContent() {
             window.history.pushState({}, '', '/search');
           } else if (v === 'settings') {
             window.history.pushState({}, '', '/settings');
+          } else if (v === 'tts') {
+            window.history.pushState({}, '', '/tts');
           }
           if (isMobile) setShowLeftSidebar(false);
         }}
@@ -1486,6 +1495,8 @@ function AppContent() {
         onClose={() => setIsVideoModalOpen(false)}
         song={songForVideo}
       />
+      {/* Listens for "songstudio:extract-stems" CustomEvents from Sidebar/DropdownMenu. */}
+      <StemExtractionModal />
       <UsernameModal
         isOpen={showUsernameModal}
         onSubmit={handleUsernameSubmit}

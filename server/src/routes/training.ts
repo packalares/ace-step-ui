@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { config } from '../config/index.js';
 import { resolvePythonPath } from '../services/acestep.js';
+import { separateStems } from '../services/audioSeparator.js';
+import { createJob, getJob, updateJob } from '../services/stemJobs.js';
 import multer from 'multer';
 import path from 'path';
 import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
@@ -824,6 +826,116 @@ router.post('/export', authMiddleware, async (req: AuthenticatedRequest, res: Re
     const status = (error as any).status || 500;
     res.status(status).json({ error: error instanceof Error ? error.message : 'Failed to export LoRA' });
   }
+});
+
+// --- Stem extraction preprocessing ----------------------------------------
+// Replaces the browser-side Demucs popup. Wraps audio-separator (CUDA) to
+// isolate vocals/instruments before training.
+//
+// The frontend just sends the upload dataset name + the resolved
+// preprocessing block from data/training-categories.json. We resolve the
+// input/output dirs relative to config.datasets.uploadsDir and create a
+// sibling dataset suffixed `_stems` so the original raw uploads stay intact.
+//
+// Body shape:
+//   {
+//     datasetName: string,            // existing folder under uploadsDir
+//     category: string,
+//     subType?: string | null,
+//     preprocessing: { model, keepStems?, chain?, extraArgs? }
+//   }
+//
+// Response: { jobId, total, outputDatasetName, outputDir }
+
+router.post('/preprocess-stems', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const { datasetName, category, subType, preprocessing } = (req.body ?? {}) as {
+    datasetName?: string;
+    category?: string;
+    subType?: string | null;
+    preprocessing?: {
+      model?: string;
+      keepStems?: string[];
+      chain?: string[];
+      extraArgs?: Record<string, unknown>;
+    };
+  };
+
+  if (!datasetName || !category || !preprocessing?.model) {
+    return res.status(400).json({
+      error: 'datasetName, category, and preprocessing.model are required',
+    });
+  }
+
+  const inputDir = path.join(config.datasets.uploadsDir, datasetName);
+  const outputDatasetName = `${datasetName}_stems`;
+  const outputDir = path.join(config.datasets.uploadsDir, outputDatasetName);
+
+  if (!existsSync(inputDir)) {
+    return res.status(404).json({ error: `dataset not found: ${datasetName}` });
+  }
+
+  // Discover audio files in inputDir.
+  const inputs = readdirSync(inputDir)
+    .filter((f) => AUDIO_EXTENSIONS.includes(path.extname(f).toLowerCase()))
+    .map((f) => path.join(inputDir, f));
+
+  if (inputs.length === 0) {
+    return res.status(400).json({ error: 'no audio files found in inputDir' });
+  }
+
+  await mkdir(outputDir, { recursive: true });
+
+  const job = createJob(inputs.length);
+  res.json({
+    jobId: job.id,
+    total: inputs.length,
+    category,
+    subType,
+    outputDatasetName,
+    outputDir,
+  });
+
+  // Background work — fire and forget.
+  void (async () => {
+    try {
+      updateJob(job.id, { status: 'running' });
+      const result = await separateStems({
+        inputPaths: inputs,
+        outputDir,
+        model: preprocessing.model!,
+        keepStems: preprocessing.keepStems,
+        chain: preprocessing.chain,
+        extraArgs: preprocessing.extraArgs,
+        onStdout: (line) => {
+          const cur = getJob(job.id);
+          if (!cur) return;
+          updateJob(job.id, { log: [...cur.log, line].slice(-200) });
+        },
+        onProgress: (msg) => {
+          const m = msg.match(/(\d+)\s*%/);
+          if (m) {
+            const cur = getJob(job.id);
+            if (!cur) return;
+            // Approximate overall progress: per-file percent averaged across total inputs.
+            const filePct = parseInt(m[1], 10);
+            const overall = Math.round(((cur.current * 100 + filePct) / cur.total));
+            updateJob(job.id, { progress: Math.min(99, overall) });
+          }
+        },
+      });
+      updateJob(job.id, { status: 'completed', progress: 100, current: inputs.length, result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      updateJob(job.id, { status: 'failed', error: message });
+    }
+  })();
+});
+
+router.get('/preprocess-stems-status', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  const jobId = String(req.query.jobId ?? '');
+  const job = getJob(jobId);
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  return res.json(job);
 });
 
 export default router;

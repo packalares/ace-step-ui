@@ -7,6 +7,12 @@ import { generateApi } from '../services/api';
 import { MAIN_STYLES } from '../data/genres';
 import { DIT_MODELS, getModelDisplayName, isTurboModel } from '../data/models';
 import { EditableSlider } from './EditableSlider';
+import { StylePresetPicker } from './StylePresetPicker';
+import stylePresetsData from '../data/style-presets.json';
+import type { StylePreset, StylePresetsFile } from '../types/training';
+
+const STYLE_PRESETS: StylePreset[] = (stylePresetsData as StylePresetsFile).presets;
+const DEFAULT_PRESET_ID = STYLE_PRESETS[0]?.id ?? 'custom';
 
 interface ReferenceTrack {
   id: string;
@@ -137,6 +143,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
 
   // Mode
   const [customMode, setCustomMode] = useState(true);
+
+  // Style preset (Suno-style picker; defaults to 'custom' which applies no overrides).
+  const [selectedPresetId, setSelectedPresetId] = useState<string>(DEFAULT_PRESET_ID);
 
   // Simple Mode
   const [songDescription, setSongDescription] = useState('');
@@ -1243,6 +1252,47 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
     }
   };
 
+  // Apply a style preset to the relevant CreatePanel state. Tags are merged
+  // into the `style` field (replacing it with the preset tags), and advanced
+  // settings update via localStorage to match how the rest of the panel
+  // reads them. The "Custom (no preset)" entry has `clear: true` and is a
+  // no-op — the user keeps whatever they had.
+  const applyStylePreset = useCallback((preset: StylePreset) => {
+    setSelectedPresetId(preset.id);
+    if (preset.clear) return;
+
+    if (preset.tags !== undefined) {
+      setStyle(preset.tags);
+    }
+    if (preset.cfgScale !== undefined) {
+      setGuidanceScale(preset.cfgScale);
+      localStorage.setItem('ace-guidanceScale', String(preset.cfgScale));
+    }
+    if (preset.inferenceSteps !== undefined) {
+      setInferenceSteps(preset.inferenceSteps);
+      localStorage.setItem('ace-inferenceSteps', String(preset.inferenceSteps));
+    }
+    if (preset.scheduler !== undefined) {
+      // The Generate panel reads inferMethod from localStorage at submit time
+      // (see fireSimpleGenerate / handleGenerate). Mirror it there.
+      localStorage.setItem('ace-inferMethod', preset.scheduler);
+    }
+    if (preset.duration !== undefined) {
+      setDuration(preset.duration);
+    }
+    // The remaining preset fields (cfgType, omegaScale, guidanceInterval,
+    // guidanceScaleText, guidanceScaleLyric, useErgTag, useErgDiffusion) are
+    // stored in localStorage so existing code paths pick them up. The keys
+    // mirror the existing `ace-*` naming convention used by SettingsPage.
+    if (preset.cfgType !== undefined) localStorage.setItem('ace-cfgType', preset.cfgType);
+    if (preset.omegaScale !== undefined) localStorage.setItem('ace-omegaScale', String(preset.omegaScale));
+    if (preset.guidanceInterval !== undefined) localStorage.setItem('ace-guidanceInterval', String(preset.guidanceInterval));
+    if (preset.guidanceScaleText !== undefined) localStorage.setItem('ace-guidanceScaleText', String(preset.guidanceScaleText));
+    if (preset.guidanceScaleLyric !== undefined) localStorage.setItem('ace-guidanceScaleLyric', String(preset.guidanceScaleLyric));
+    if (preset.useErgTag !== undefined) localStorage.setItem('ace-useErgTag', String(preset.useErgTag));
+    if (preset.useErgDiffusion !== undefined) localStorage.setItem('ace-useErgDiffusion', String(preset.useErgDiffusion));
+  }, []);
+
   const handleGenerate = () => {
     // Custom mode: auto-detect instrumental from lyrics. Simple mode: use toggle.
     const autoInstrumental = customMode
@@ -1449,6 +1499,14 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
             </button>
           </div>
         </div>
+
+        {/* STYLE PRESET PICKER (Suno-style) — applies vetted defaults to the
+            existing form fields. Default selection is "Custom (no preset)". */}
+        <StylePresetPicker
+          presets={STYLE_PRESETS}
+          selectedId={selectedPresetId}
+          onSelect={applyStylePreset}
+        />
 
         {/* SIMPLE MODE */}
         {!customMode && (
