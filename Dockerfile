@@ -74,7 +74,7 @@ RUN pip install --no-cache-dir "audio-separator[gpu]==0.44.1"
 # Models live under AUDIO_SEPARATOR_MODEL_DIR; the Node server reads from there.
 ENV AUDIO_SEPARATOR_MODEL_DIR=/app/.audio-separator-models
 RUN mkdir -p ${AUDIO_SEPARATOR_MODEL_DIR} \
- && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m MelBandRoformer.ckpt \
+ && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m vocals_mel_band_roformer.ckpt \
  && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m model_bs_roformer_ep_317_sdr_12.9755.ckpt \
  && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m htdemucs_6s.yaml
 
