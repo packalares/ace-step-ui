@@ -72,11 +72,17 @@ RUN pip install --no-cache-dir "audio-separator[gpu]==0.44.1"
 
 # Pre-warm checkpoints into the image so first separation is fast.
 # Models live under AUDIO_SEPARATOR_MODEL_DIR; the Node server reads from there.
+# Each prewarm is fault-tolerant — if a transient CDN error (HTTP 502 from
+# github.com/TRvlvr/model_repo, etc.) breaks one download, the build still
+# succeeds and audio-separator lazy-downloads that model on first use.
 ENV AUDIO_SEPARATOR_MODEL_DIR=/app/.audio-separator-models
 RUN mkdir -p ${AUDIO_SEPARATOR_MODEL_DIR} \
- && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m vocals_mel_band_roformer.ckpt \
- && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m model_bs_roformer_ep_317_sdr_12.9755.ckpt \
- && audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m htdemucs_6s.yaml
+ && (audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m vocals_mel_band_roformer.ckpt \
+     || echo "WARN: prewarm failed for vocals_mel_band_roformer.ckpt; will lazy-download at runtime") \
+ && (audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m model_bs_roformer_ep_317_sdr_12.9755.ckpt \
+     || echo "WARN: prewarm failed for model_bs_roformer_ep_317_sdr_12.9755.ckpt; will lazy-download at runtime") \
+ && (audio-separator --download_model_only --model_file_dir ${AUDIO_SEPARATOR_MODEL_DIR} -m htdemucs_6s.yaml \
+     || echo "WARN: prewarm failed for htdemucs_6s.yaml; will lazy-download at runtime")
 
 # Patch: decouple api_server from Gradio imports
 RUN cd /app/ACE-Step-1.5 && \
