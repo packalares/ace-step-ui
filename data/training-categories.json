@@ -8,7 +8,7 @@
       "icon": "Mic",
       "preprocessing": {
         "enabled": true,
-        "model": "MelBandRoformer.ckpt",
+        "model": "vocals_mel_band_roformer.ckpt",
         "keepStems": ["vocals"],
         "extraArgs": {
           "mdxc_segment_size": 256,
