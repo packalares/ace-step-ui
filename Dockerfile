@@ -109,9 +109,15 @@ COPY components/ /app/ui/components/
 COPY context/ /app/ui/context/
 COPY services/ /app/ui/services/
 COPY data/ /app/ui/data/
+COPY hooks/ /app/ui/hooks/
+COPY types/ /app/ui/types/
 COPY i18n/ /app/ui/i18n/
 COPY audiomass-editor/ /app/ui/audiomass-editor/
 COPY App.tsx index.tsx types.ts global.d.ts vite-env.d.ts /app/ui/
+
+# Python helpers invoked by the Node server via subprocess
+# (currently: indextts2_infer.py for voice-cloned TTS).
+COPY python/ /app/ui/python/
 
 # Copy server source
 COPY server/ /app/ui/server/
