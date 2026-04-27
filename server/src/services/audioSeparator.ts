@@ -11,10 +11,24 @@
  * Models are cached under AUDIO_SEPARATOR_MODEL_DIR (defaults to
  * /app/.audio-separator-models) which is pre-warmed in the Dockerfile.
  */
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { existsSync } from 'fs';
-import { mkdir, readdir, unlink } from 'fs/promises';
+import { access, mkdir, readdir, unlink } from 'fs/promises';
 import path from 'path';
+
+const ACESTEP_API_URL = process.env.ACESTEP_API_URL || 'http://127.0.0.1:8000';
+const WHISPER_CLI = process.env.WHISPER_CLI ?? '/app/ui/python/whisper_cli.py';
+const PYTHON_BIN = process.env.WHISPER_PYTHON ?? '/app/.venv/bin/python3';
+
+// CTranslate2 (faster-whisper's compute backend) is built against CUDA 12,
+// but this image runs CUDA 13. Standalone CUDA 12 libs are pip-installed via
+// nvidia-cublas-cu12 + nvidia-cudnn-cu12 (see Dockerfile). Their .so files
+// live at these paths — we prepend them to LD_LIBRARY_PATH when spawning
+// whisper_cli so CTranslate2 can find libcublas.so.12 / libcudnn.so.9.
+const WHISPER_LD_PATHS = [
+  '/app/.venv/lib/python3.11/site-packages/nvidia/cublas/lib',
+  '/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib',
+];
 
 export interface SeparateOptions {
   inputPaths: string[];                 // absolute file paths
@@ -194,6 +208,127 @@ function isChainSupported(_chain: string[]): boolean {
   return false;
 }
 
+/**
+ * Ensure the GPU is empty before running Whisper. If ACE-Step has any
+ * model loaded, kills the python process — in dev-mode the supervisor at
+ * PID 1 auto-respawns it in lazy mode (no models). In production (no
+ * supervisor) the FastAPI's startup is via start.sh and the user would
+ * need to wait for the next restartAceStep cycle; the polling loop here
+ * gives it time to come back up either way.
+ */
+export async function ensureGpuEmptyForWhisper(
+  onStdout?: (line: string) => void,
+): Promise<void> {
+  // Probe the live ACE-Step inventory.
+  let anyLoaded = false;
+  try {
+    const r = await fetch(`${ACESTEP_API_URL}/v1/model_inventory`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (r.ok) {
+      const data = await r.json() as { data?: { models?: Array<{ is_loaded?: boolean }>; lm_models?: Array<{ is_loaded?: boolean }> } };
+      const models = data.data?.models ?? [];
+      const lms = data.data?.lm_models ?? [];
+      anyLoaded = models.some(m => m.is_loaded) || lms.some(m => m.is_loaded);
+    }
+  } catch {
+    // FastAPI may be down — proceed; pkill below is a no-op if nothing matches.
+  }
+
+  if (!anyLoaded) {
+    onStdout?.('[whisper] GPU already clean, skipping unload');
+    return;
+  }
+
+  onStdout?.('[whisper] models loaded, killing ACE-Step to free GPU...');
+
+  // Refuse to unload while training is in progress — would lose state.
+  try {
+    const sr = await fetch(`${ACESTEP_API_URL}/v1/training/status`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (sr.ok) {
+      const d = await sr.json() as any;
+      if (d?.data?.is_training) {
+        throw new Error('Cannot run Whisper preprocessing while ACE-Step training is in progress');
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('training is in progress')) throw err;
+    // Status endpoint unreachable is fine — proceed.
+  }
+
+  try {
+    execSync("pkill -f 'acestep.api_server'", { timeout: 5000 });
+  } catch {
+    // Already dead; fine.
+  }
+
+  // Wait for it to come back up. Supervisor poll fires every 10s; restartAceStep
+  // fallback (production path) takes ~5-10s. Give 60s total.
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const r = await fetch(`${ACESTEP_API_URL}/health`, { signal: AbortSignal.timeout(2000) });
+      if (r.ok) {
+        onStdout?.(`[whisper] ACE-Step back up after ${(i + 1) * 2}s`);
+        return;
+      }
+    } catch {}
+  }
+  throw new Error('ACE-Step did not come back up within 60s after unload');
+}
+
+/**
+ * Run whisper_cli.py over the stem output directory. Writes
+ * <basename>.txt + <basename>.lang.txt next to each WAV. Build-dataset
+ * picks them up automatically as raw_lyrics — auto-label then uses the
+ * preloaded path instead of asking the 5Hz LM to transcribe.
+ */
+export async function runWhisperBatch(
+  outputDir: string,
+  onStdout?: (line: string) => void,
+): Promise<void> {
+  try {
+    await access(WHISPER_CLI);
+  } catch {
+    onStdout?.(`[whisper] script not found at ${WHISPER_CLI}, skipping transcription`);
+    return;
+  }
+
+  return new Promise((resolve, reject) => {
+    const ldPath = [
+      ...WHISPER_LD_PATHS,
+      process.env.LD_LIBRARY_PATH ?? '',
+    ].filter(Boolean).join(':');
+
+    const proc = spawn(PYTHON_BIN, [WHISPER_CLI, outputDir], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, LD_LIBRARY_PATH: ldPath },
+    });
+
+    let buf = '';
+    const pump = (chunk: Buffer) => {
+      buf += chunk.toString('utf-8');
+      let idx;
+      while ((idx = buf.search(/[\r\n]/)) >= 0) {
+        const line = buf.slice(0, idx);
+        buf = buf.slice(idx + 1);
+        if (line) onStdout?.(line);
+      }
+    };
+    proc.stdout.on('data', pump);
+    proc.stderr.on('data', pump);
+
+    proc.on('error', (err) => reject(err));
+    proc.on('close', (code) => {
+      if (buf) onStdout?.(buf);
+      if (code === 0) resolve();
+      else reject(new Error(`whisper_cli exited with code ${code}`));
+    });
+  });
+}
+
 export async function separateStems(opts: SeparateOptions): Promise<SeparateResult> {
   const { inputPaths, outputDir, model, keepStems, chain, extraArgs, onProgress, onStdout } = opts;
 
@@ -240,6 +375,24 @@ export async function separateStems(opts: SeparateOptions): Promise<SeparateResu
     }
 
     outputs.push({ input, stems: kept });
+  }
+
+  // After all stems are extracted, run Whisper on the output directory to
+  // produce <basename>.txt + <basename>.lang.txt companions. This happens
+  // BEFORE ACE-Step's models load (they lazy-load when the user enters the
+  // Label step), so the GPU is empty and Whisper-large-v3 fp16 fits cleanly.
+  // If anything was loaded, ensureGpuEmptyForWhisper kills + waits.
+  if (keepStems && keepStems.some(s => /vocals?/i.test(s))) {
+    try {
+      await ensureGpuEmptyForWhisper(onStdout);
+      onStdout?.(`[whisper] transcribing stems in ${outputDir}`);
+      await runWhisperBatch(outputDir, onStdout);
+    } catch (err) {
+      onStdout?.(`[whisper] WARN: transcription failed (${err instanceof Error ? err.message : String(err)})`);
+      // Don't fail the whole stem-extraction job — auto-label can still
+      // run, just without preloaded lyrics. Voice training quality drops
+      // but the dataset is still usable.
+    }
   }
 
   return {

@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
-  Play, Square, Download, FolderOpen, Save, Loader2,
+  Play, Square, FolderOpen, Save, Loader2,
   Edit3, Upload, X, Volume2, FileAudio, Zap,
-  Wand2, Check, Layers, Info,
+  Wand2, Check, Layers, Info, Trash2,
 } from 'lucide-react';
 import { PageLayout, Card, CardHeader, Button, Badge } from './ui';
 import { useAuth } from '../context/AuthContext';
@@ -40,20 +40,64 @@ const PIPELINE_STEPS = [
   { key: 'label', label: 'Label', icon: Wand2, num: 2 },
   { key: 'preprocess', label: 'Preprocess', icon: Zap, num: 3 },
   { key: 'train', label: 'Train', icon: Play, num: 4 },
-  { key: 'export', label: 'Export', icon: Download, num: 5 },
 ] as const;
 
 type StepKey = typeof PIPELINE_STEPS[number]['key'];
 
-// Build a slug-safe dataset name suggestion from category id + timestamp.
-function suggestDatasetName(categoryId: TrainingCategoryId, subTypeId: string | null): string {
-  const slug = subTypeId ? `${categoryId}_${subTypeId}` : categoryId;
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[:T]/g, '-')
-    .replace(/\..*$/, '')
-    .replace(/-/g, '');
-  return `${slug}_${stamp}`;
+// Stop words to exclude from filename-based persona name suggestion.
+// Mostly file-format / song-structure words + tiny common Romanian/English
+// connectives that won't make good LoRA folder names.
+const NAME_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'feat', 'ft', 'official', 'video', 'audio',
+  'live', 'studio', 'recording', 'session', 'cover', 'remix', 'remaster',
+  'final', 'mp3', 'wav', 'flac', 'ogg', 'm4a', 'opus',
+  // Generic Romanian/English connectives that show up a lot in filenames:
+  'cum', 'daca', 'pentru', 'noi', 'imi', 'eu', 'tu',
+  'song', 'track', 'lyrics',
+]);
+
+/**
+ * Pick a persona slug from a set of uploaded filenames. Tokenises every
+ * filename, counts non-stop words ≥3 chars, returns the most common token.
+ * For "Guta-Ce noroc.mp3" + "Nicolae Guta - Cum te-a lasat.mp3" + "Nicolae
+ * Guta - Daca nu ne potrivim.mp3" it returns "guta" (appears in all 3).
+ */
+function suggestPersonaSlug(files: File[]): string | null {
+  if (files.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const f of files) {
+    const base = f.name.replace(/\.[^.]+$/, '');
+    const seen = new Set<string>();
+    for (const w of base.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) {
+      if (w.length < 3) continue;
+      if (NAME_STOP_WORDS.has(w)) continue;
+      if (/^\d+$/.test(w)) continue;
+      if (seen.has(w)) continue;
+      seen.add(w);
+      counts.set(w, (counts.get(w) ?? 0) + 1);
+    }
+  }
+  const sorted = [...counts.entries()].sort(
+    (a, b) => b[1] - a[1] || b[0].length - a[0].length,
+  );
+  return sorted[0]?.[0] ?? null;
+}
+
+// Build a slug-safe dataset name. Prefers a persona slug derived from the
+// filenames (e.g. "guta" from a batch of Guta tracks); falls back to the
+// short ISO date if no usable token is found.
+function suggestDatasetName(
+  categoryId: TrainingCategoryId,
+  subTypeId: string | null,
+  files: File[] = [],
+): string {
+  const base = subTypeId ? `${categoryId}_${subTypeId}` : categoryId;
+  const slug = suggestPersonaSlug(files);
+  if (slug) return `${base}_${slug}`;
+  // Fallback: short date (YYYYMMDD), no time — readable, conflicts re-train
+  // the same persona slot rather than spawning timestamped duplicates.
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  return `${base}_${today}`;
 }
 
 export const TrainingPanel: React.FC = () => {
@@ -181,14 +225,14 @@ export const TrainingPanel: React.FC = () => {
   const [trainingMetrics, setTrainingMetrics] = useState<unknown>(null);
   const [trainingDatasetInfo, setTrainingDatasetInfo] = useState('');
 
-  // Export state
-  const [exportPath, setExportPath] = useState('./lora_output/final_lora');
-  const [exportOutputDir, setExportOutputDir] = useState('./lora_output');
-  const [exportStatus, setExportStatus] = useState('');
+  // Cleanup (post-training): wipes intermediate artifacts (raw uploads,
+  // stems, checkpoints, logs, preprocessed tensors, dataset metadata),
+  // keeps only the final LoRA adapter under outputDir.
+  const [cleanupRunning, setCleanupRunning] = useState(false);
+  const [cleanupStatus, setCleanupStatus] = useState('');
 
   // Loading states
   const [saving, setSaving] = useState(false);
-  const [exporting, setExporting] = useState(false);
 
   // Audio preview URL
   const audioPreviewUrl = useMemo(() => {
@@ -259,7 +303,10 @@ export const TrainingPanel: React.FC = () => {
     // the placeholder default).
     setUploadDatasetName(prev => {
       if (!prev || prev === 'my_lora_dataset' || prev.startsWith(`${categoryConfig.id}_`) || prev.startsWith(`${categoryConfig.id}/`)) {
-        return suggestDatasetName(categoryConfig.id, categoryConfig.subTypeId);
+        // queuedFiles may be empty here (the user often picks a category
+        // before uploading); a separate effect re-runs the suggestion once
+        // files arrive.
+        return suggestDatasetName(categoryConfig.id, categoryConfig.subTypeId, queuedFiles);
       }
       return prev;
     });
@@ -273,14 +320,54 @@ export const TrainingPanel: React.FC = () => {
     }));
   }, [categoryConfig, buildOutputDir]);
 
+  // Resolve the special `__PERSONA_TRIGGER__` placeholder in the JSON-defined
+  // customTag to a real, unique-per-LoRA trigger word derived from the dataset
+  // name. e.g. dataset `voice_nicolae` → trigger `nicolaevoice, `. This gives
+  // each LoRA a distinct activation handle the base model has never seen,
+  // instead of a generic word like "voice clone" that competes with what the
+  // base model already does. Without this, voice LoRAs barely fire.
+  useEffect(() => {
+    if (!categoryConfig) return;
+    if (categoryConfig.autoLabel.customTag !== '__PERSONA_TRIGGER__') return;
+    // Strip the category prefix from the dataset name to get the persona slug,
+    // then suffix with the category id to make it unambiguous.
+    // voice_nicolae → nicolae → nicolaevoice
+    // genre_manele  → manele  → manelegenre
+    const stripped = uploadDatasetName
+      .replace(new RegExp(`^${categoryConfig.id}_+`), '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const slug = stripped || uploadDatasetName.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const trigger = `${slug}${categoryConfig.id}, `;
+    setDatasetSettings(prev =>
+      prev.customTag === trigger ? prev : { ...prev, customTag: trigger },
+    );
+  }, [categoryConfig, uploadDatasetName]);
+
+  // Re-suggest the dataset name once files are queued — derives a persona
+  // slug from the filenames (e.g. "guta") so the LoRA folder is meaningful.
+  // Skips if the user has typed a custom name.
+  useEffect(() => {
+    if (!categoryConfig) return;
+    if (queuedFiles.length === 0) return;
+    setUploadDatasetName(prev => {
+      const isPlaceholder =
+        !prev
+        || prev === 'my_lora_dataset'
+        || /^[a-z_]+_\d{8}$/.test(prev) // matches the date-fallback we generated earlier
+        || prev === `${categoryConfig.id}` // bare category id
+        || (categoryConfig.subTypeId && prev === `${categoryConfig.id}_${categoryConfig.subTypeId}`);
+      if (!isPlaceholder) return prev;
+      return suggestDatasetName(categoryConfig.id, categoryConfig.subTypeId, queuedFiles);
+    });
+  }, [categoryConfig, queuedFiles]);
+
   // Whenever the dataset name changes (and a category is selected), update the
   // training output dir to point inside `${outputRoot}/${outputSubdir}/${name}`.
   useEffect(() => {
     if (!categoryConfig) return;
     const path = buildOutputDir(uploadDatasetName);
     setTrainingParams(prev => (prev.outputDir === path ? prev : { ...prev, outputDir: path }));
-    setExportOutputDir(path);
-    setExportPath(`${path}/final`);
   }, [categoryConfig, uploadDatasetName, buildOutputDir]);
 
   const populateSampleFields = (sample: TrainingSample) => {
@@ -470,6 +557,10 @@ export const TrainingPanel: React.FC = () => {
         }
         setUploadStatus('Stems ready. Building dataset…');
       } else {
+        // Categories without stem extraction (genre/mood/producer/groove) skip
+        // Whisper here — they don't generally need lyrics for training. If a
+        // future category does need lyrics without stems, call
+        // trainingApi.transcribeUploads(uploadDatasetName, token) explicitly.
         setUploadStatus(`Uploaded ${queuedFiles.length} files. Building dataset…`);
       }
 
@@ -807,24 +898,32 @@ export const TrainingPanel: React.FC = () => {
     }
   }, [token]);
 
-  // === Export ===
-  const handleExportLora = useCallback(async () => {
+  // === Cleanup training artifacts ===
+  // Wipes everything except the final LoRA adapter under outputDir/final.
+  // Removes: checkpoints/, logs/, raw uploads/<dataset>/, stem dir, the
+  // dataset JSON, and preprocessed tensors. Asks the user to confirm —
+  // there's no undo.
+  const handleCleanupArtifacts = useCallback(async () => {
     if (!token) return;
-    setExporting(true);
-    setExportStatus('Exporting...');
+    if (!window.confirm(
+      'Delete all training artifacts (raw uploads, stems, checkpoints, '
+      + 'logs, preprocessed tensors)? The final LoRA adapter will be kept. '
+      + 'This cannot be undone.',
+    )) return;
+    setCleanupRunning(true);
+    setCleanupStatus('Cleaning up...');
     try {
-      const result = await trainingApi.exportLora({
-        exportPath,
-        loraOutputDir: exportOutputDir,
+      const result = await trainingApi.cleanupArtifacts({
+        outputDir: trainingParams.outputDir,
+        datasetName: uploadDatasetName,
       }, token);
-      setExportStatus(result.status as string);
-      markStep('export');
+      setCleanupStatus(result.status as string);
     } catch (error) {
-      setExportStatus(`${t('error')}: ${error instanceof Error ? error.message : 'Failed'}`);
+      setCleanupStatus(`${t('error')}: ${error instanceof Error ? error.message : 'Failed'}`);
     } finally {
-      setExporting(false);
+      setCleanupRunning(false);
     }
-  }, [token, exportPath, exportOutputDir, t, markStep]);
+  }, [token, trainingParams.outputDir, uploadDatasetName, t]);
 
   // Mark category step complete whenever a valid selection exists.
   useEffect(() => {
@@ -1285,41 +1384,33 @@ export const TrainingPanel: React.FC = () => {
                 <div className="bg-black/20 rounded-lg p-2">{lossChartSvg}</div>
               </Section>
             )}
-          </>
-        )}
 
-        {/* ===== STEP 5: EXPORT ===== */}
-        {activeStep === 'export' && (
-          <>
-            <Section title="Export LoRA">
-              <p className="text-[11px] text-zinc-500 mb-3">Export your trained LoRA adapter for use in generation.</p>
-              <div className="space-y-2">
-                <FieldRow label="Export Path">
-                  <input type="text" value={exportPath} onChange={e => setExportPath(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500" />
-                </FieldRow>
-                <FieldRow label="LoRA Output Dir">
-                  <input type="text" value={exportOutputDir} onChange={e => setExportOutputDir(e.target.value)} className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500" />
-                </FieldRow>
-              </div>
-              <div className="flex justify-end pt-3 mt-3 border-t border-zinc-800/50">
-                <button onClick={handleExportLora} disabled={exporting} className="px-4 py-2 text-xs bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium flex items-center gap-2 disabled:opacity-50">
-                  {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                  Export LoRA
-                </button>
-              </div>
-              {exportStatus && (
-                <div className={`mt-2 px-3 py-2 rounded-lg text-xs ${exportStatus.startsWith('Error') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
-                  {exportStatus}
-                </div>
-              )}
-            </Section>
-
-            {completedSteps.has('export') && (
-              <Section title="Next Steps">
-                <p className="text-xs text-zinc-400">
-                  Your LoRA adapter has been exported. Go to the Create page and open the LoRA section to load it at:
+            {/* Post-training cleanup — only surfaces once a run has completed.
+                The trained adapter lives at <outputDir>/final/adapter and is
+                kept; everything else under outputDir + the source dataset
+                directories is removed to reclaim disk. */}
+            {completedSteps.has('train') && !isTraining && (
+              <Section title="Cleanup">
+                <p className="text-[11px] text-zinc-500 mb-2">
+                  Delete intermediate artifacts (raw uploads, stems, checkpoints,
+                  logs, preprocessed tensors, dataset JSON). The final LoRA at
+                  <span className="text-pink-400 font-mono"> {trainingParams.outputDir}/final/adapter</span> is preserved.
                 </p>
-                <p className="text-xs text-pink-400 font-mono mt-1">{exportPath}/adapter</p>
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleCleanupArtifacts}
+                    disabled={cleanupRunning}
+                    className="px-4 py-2 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg font-medium flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {cleanupRunning ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                    Delete training artifacts
+                  </button>
+                </div>
+                {cleanupStatus && (
+                  <div className={`mt-2 px-3 py-2 rounded-lg text-xs ${cleanupStatus.toLowerCase().startsWith('error') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+                    {cleanupStatus}
+                  </div>
+                )}
               </Section>
             )}
           </>

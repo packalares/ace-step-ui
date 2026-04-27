@@ -63,6 +63,13 @@ RUN pip install -e /app/ACE-Step-1.5/acestep/third_parts/nano-vllm && \
 # Pin torchcodec to 0.10.0 (0.11+ needs PyTorch > 2.10)
 RUN pip install torchcodec==0.10.0
 
+# Pin triton ≥3.0. Torch 2.10 ships with triton 2.3.1 by default, but modern
+# transformers (≥4.55) routes through torch._inductor which does
+# `import triton.backends.compiler` — that submodule only exists in triton 3.x.
+# Without this pin, a cascading ImportError takes down FastAPI's LLM handler
+# (acestep/llm_inference.py → from transformers import AutoTokenizer fails).
+RUN pip install --no-cache-dir "triton>=3.0"
+
 # Lyrics LLM (llama-cpp-python for GGUF model inference)
 RUN pip install llama-cpp-python
 
@@ -100,6 +107,63 @@ RUN cd /app/ACE-Step-1.5 && \
     sed -i '/chunk_size=request.chunk_size,/d; /batch_size=request.batch_size,/d; /sample_labeled_callback=/d' \
     acestep/api/train_api_dataset_auto_label_async_route.py \
     acestep/api/train_api_dataset_auto_label_sync_route.py 2>/dev/null || true
+
+# Multilingual lyric transcription via faster-whisper. ACE-Step's 5Hz LM
+# can't transcribe most non-English/Chinese lyrics; Whisper-large-v3
+# covers 99+ languages. Used by python/whisper_cli.py during the stem
+# extraction pipeline (BEFORE ACE-Step models load, GPU is empty).
+RUN pip install --no-cache-dir faster-whisper
+
+# IndexTTS2 — voice-cloned text-to-speech, used by python/indextts2_infer.py.
+# Upstream EXPLICITLY requires the `uv` package manager and refuses support for
+# pip installs (their pinned deps include torch==2.8 / transformers==4.52 /
+# numpy==1.26 — all incompatible with ace-step's torch 2.10 / transformers 4.57
+# in the main venv). So we install IndexTTS in its own uv-managed project venv
+# at /app/indextts-src/.venv and subprocess into it from the Express server.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+ && /root/.local/bin/uv --version \
+ && git clone --depth 1 https://github.com/index-tts/index-tts.git /app/indextts-src \
+ && cd /app/indextts-src && /root/.local/bin/uv sync \
+ && /root/.local/bin/uv tool install "huggingface-hub[cli,hf_xet]" \
+ && /root/.local/share/uv/tools/huggingface-hub/bin/hf download IndexTeam/IndexTTS-2 \
+        --local-dir=/app/indextts-src/checkpoints
+
+ENV INDEXTTS2_PROJECT=/app/indextts-src \
+    INDEXTTS2_PYTHON=/app/indextts-src/.venv/bin/python \
+    INDEXTTS2_MODEL_DIR=/app/indextts-src/checkpoints
+
+# CTranslate2 (faster-whisper's backend) is built against CUDA 12, but this
+# image runs CUDA 13 — libcublas.so.13 doesn't satisfy CTranslate2's
+# libcublas.so.12 dependency. Install standalone CUDA 12 cuBLAS + cuDNN
+# via pip (faster-whisper's documented workaround) and put their .so paths
+# in LD_LIBRARY_PATH so CTranslate2 finds them at runtime.
+RUN pip install --no-cache-dir nvidia-cublas-cu12 nvidia-cudnn-cu12
+
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}
+
+# Pre-warm Whisper-large-v3 into the image. Pinned path matches the
+# default in WhisperContext; no first-run download at runtime.
+ENV WHISPER_MODEL_DIR=/app/.whisper-models/large-v3
+RUN python3 -c "from huggingface_hub import snapshot_download; \
+    snapshot_download(repo_id='Systran/faster-whisper-large-v3', \
+                      local_dir='${WHISPER_MODEL_DIR}')"
+
+# Apply Whisper patch — only the priority fix in label_single.py (preloaded
+# raw_lyrics from whisper_cli companion files override the LM's bad lyric
+# transcription path). Whisper itself runs as a separate stage in the
+# Express stem-extraction pipeline (server/src/services/audioSeparator.ts
+# → python/whisper_cli.py) BEFORE ACE-Step's models load — no in-LM
+# orchestration is needed.
+COPY python/acestep_patches/label_single.py \
+     /app/ACE-Step-1.5/acestep/training/dataset_builder_modules/label_single.py
+
+# Apply trainer patch — saves current LoRA weights to <output_dir>/final/adapter
+# when the user clicks Stop, instead of returning empty-handed. Upstream's
+# stop handler just returns without checkpointing, so every Stop = lose all
+# in-flight progress. Two should_stop branches in LoRATrainer get the same
+# save-then-yield treatment; LoKr branches are left as upstream (unused here).
+COPY python/acestep_patches/trainer.py \
+     /app/ACE-Step-1.5/acestep/training/trainer.py
 
 ENV PYTHONPATH=/app/ACE-Step-1.5
 

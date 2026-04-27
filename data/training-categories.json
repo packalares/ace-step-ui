@@ -4,7 +4,7 @@
     {
       "id": "voice",
       "displayName": "Voice / Vocalist",
-      "description": "Capture a singer, rapper, choir or distinctive vocal style. Vocals are isolated automatically before training.",
+      "description": "Capture a singer's voice. Vocals are isolated automatically (Mel-Roformer) and Whisper transcribes the clean stems. Training runs on the isolated vocals with a unique persona trigger word baked into every caption.",
       "icon": "Mic",
       "preprocessing": {
         "enabled": true,
@@ -19,7 +19,7 @@
         "skipMetas": true,
         "transcribeLyrics": true,
         "formatLyrics": false,
-        "customTag": "voice clone, ",
+        "customTag": "__PERSONA_TRIGGER__",
         "tagPosition": "prepend"
       },
       "training": {
@@ -38,7 +38,7 @@
         "recommendedSamples": 30,
         "minSampleSeconds": 4,
         "maxSampleSeconds": 30,
-        "instructions": "Upload clean vocal recordings — solo singing, rapping, or speech in the target voice. Background music will be removed automatically. 20-40 short clips works best."
+        "instructions": "Upload 8-30 full songs by the target singer. Captions are auto-generated, with a unique trigger word (e.g. nicolaevoice) prepended to every caption — write that trigger in your prompt at generation time to activate the voice."
       }
     },
     {

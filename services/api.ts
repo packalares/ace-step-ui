@@ -808,6 +808,26 @@ export const trainingApi = {
   }, token: string): Promise<{ status: string }> =>
     api('/api/training/export', { method: 'POST', body: params, token }),
 
+  /**
+   * Wipe intermediate training artifacts under outputDir (checkpoints, logs,
+   * preprocessed tensors) plus the source dataset (raw uploads, stems,
+   * dataset JSON). Keeps `<outputDir>/final/adapter`.
+   */
+  cleanupArtifacts: (params: {
+    outputDir: string;
+    datasetName: string;
+  }, token: string): Promise<{ status: string; removed?: string[] }> =>
+    api('/api/training/cleanup-artifacts', { method: 'POST', body: params, token }),
+
+  /**
+   * Run Whisper on the upload folder of a dataset. Writes companion
+   * `<basename>.txt` + `<basename>.lang.txt` files next to the originals so
+   * build-dataset picks them up as raw_lyrics + language. Used when the
+   * category skips stem extraction.
+   */
+  transcribeUploads: (datasetName: string, token: string): Promise<{ status: string; dir: string }> =>
+    api('/api/training/transcribe-uploads', { method: 'POST', body: { datasetName }, token }),
+
   importDataset: (datasetType: string, token: string): Promise<{ status: string }> =>
     api('/api/training/import-dataset', { method: 'POST', body: { datasetType }, token }),
 };

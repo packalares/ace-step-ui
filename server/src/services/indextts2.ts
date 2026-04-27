@@ -32,11 +32,23 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_SCRIPT = path.resolve(__dirname, '../../../python/indextts2_infer.py');
 
 function resolveBinary(): string {
-  return process.env.INDEXTTS2_PYTHON || 'python';
+  // IndexTTS lives in its own uv-managed venv (Python 3.10 / torch 2.8 / transformers 4.52,
+  // pinned by upstream's uv.lock — see /app/indextts-src). The main pod venv has Python 3.11
+  // and conflicting torch/transformers/numpy versions, so we MUST use the indextts venv's
+  // python interpreter, not the main `python` on PATH.
+  return process.env.INDEXTTS2_PYTHON || '/app/indextts-src/.venv/bin/python';
 }
 
 function resolveScript(): string {
   return process.env.INDEXTTS2_SCRIPT || DEFAULT_SCRIPT;
+}
+
+function resolveProjectDir(): string {
+  return process.env.INDEXTTS2_PROJECT || '/app/indextts-src';
+}
+
+function resolveModelDir(): string | undefined {
+  return process.env.INDEXTTS2_MODEL_DIR || '/app/indextts-src/checkpoints';
 }
 
 /**
@@ -61,13 +73,28 @@ export async function cloneVoiceTTS(opts: CloneOptions): Promise<CloneResult> {
   if (typeof opts.intervalSilence === 'number') args.push('--interval-silence', String(opts.intervalSilence));
   if (typeof opts.seed === 'number') args.push('--seed', String(opts.seed));
   if (opts.device) args.push('--device', opts.device);
-  if (opts.modelDir) args.push('--model-dir', opts.modelDir);
+  // Default model dir to /app/indextts-src/checkpoints (the upstream uv-managed
+  // location with the downloaded ~5GB IndexTTS-2 weights). Caller can override.
+  const modelDir = opts.modelDir || resolveModelDir();
+  if (modelDir) args.push('--model-dir', modelDir);
 
   const startedAt = Date.now();
 
+  // PYTHONPATH must include the indextts-src project root so `from indextts.infer_v2
+  // import IndexTTS2` resolves (the indextts package lives at <project>/indextts/).
+  // Setting cwd=<project> would also work, but PYTHONPATH is more predictable when
+  // the script and the package live in different directories.
+  const projectDir = resolveProjectDir();
+  const indexttsEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    PYTHONUNBUFFERED: '1',
+    PYTHONPATH: [projectDir, process.env.PYTHONPATH ?? ''].filter(Boolean).join(':'),
+  };
+
   return new Promise<CloneResult>((resolve, reject) => {
     const proc = spawn(resolveBinary(), args, {
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      env: indexttsEnv,
+      cwd: projectDir,
     });
 
     let stdoutBuf = '';

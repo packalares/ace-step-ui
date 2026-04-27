@@ -2,12 +2,12 @@ import { Router, Request, Response } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { config } from '../config/index.js';
 import { resolvePythonPath } from '../services/acestep.js';
-import { separateStems } from '../services/audioSeparator.js';
+import { separateStems, runWhisperBatch, ensureGpuEmptyForWhisper } from '../services/audioSeparator.js';
 import { createJob, getJob, updateJob } from '../services/stemJobs.js';
 import multer from 'multer';
 import path from 'path';
 import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
-import { mkdir, writeFile, readFile } from 'fs/promises';
+import { mkdir, writeFile, readFile, rm } from 'fs/promises';
 import { execSync, spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 
@@ -136,6 +136,37 @@ router.post('/upload-audio', authMiddleware, audioUpload.array('audio', 50), asy
   }
 });
 
+// POST /api/training/transcribe-uploads — Run Whisper on the upload folder
+// for a dataset, writing `<basename>.txt` + `<basename>.lang.txt` companion
+// files alongside the originals. build-dataset picks them up automatically.
+//
+// Used when the category preset has preprocessing.enabled=false (no stem
+// extraction → Whisper would otherwise never run, leaving raw_lyrics empty
+// for non-instrumental songs).
+//
+// Body: { datasetName: string }
+// Response: { status, transcribed, dir }
+router.post('/transcribe-uploads', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { datasetName } = (req.body ?? {}) as { datasetName?: string };
+    if (!datasetName) {
+      return res.status(400).json({ error: 'datasetName is required' });
+    }
+    const audioDir = path.join(config.datasets.uploadsDir, datasetName);
+    if (!existsSync(audioDir)) {
+      return res.status(400).json({ error: `Upload directory not found: ${audioDir}` });
+    }
+    // Free GPU first — ACE-Step's DiT/LM may be loaded from a previous
+    // generation; Whisper-large-v3 fp16 needs ~3GB.
+    await ensureGpuEmptyForWhisper(line => console.log('[whisper:gpu]', line));
+    await runWhisperBatch(audioDir, line => console.log('[whisper]', line));
+    res.json({ status: 'Transcription complete', dir: audioDir });
+  } catch (error) {
+    console.error('[Training] Transcribe-uploads error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Transcription failed' });
+  }
+});
+
 // POST /api/training/build-dataset — Scan audio directory + create dataset JSON
 router.post('/build-dataset', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -166,12 +197,24 @@ router.post('/build-dataset', authMiddleware, async (req: AuthenticatedRequest, 
       const duration = getAudioDuration(audioPath);
       const baseName = path.basename(filename, path.extname(filename));
 
-      // Check for companion .txt lyrics file
+      // Check for companion .txt lyrics file (written by whisper_cli.py
+      // during stem extraction, or hand-placed by the user).
       let rawLyrics = '';
       const lyricsPath = path.join(audioDir, `${baseName}.txt`);
       if (existsSync(lyricsPath)) {
         try {
           rawLyrics = readFileSync(lyricsPath, 'utf-8').trim();
+        } catch { /* ignore */ }
+      }
+
+      // Check for companion .lang.txt — Whisper writes the detected ISO 639-1
+      // language code here. Without this, language stays 'unknown' and the
+      // 5Hz LM gets a chance to mis-detect (e.g. Romanian → Turkish).
+      let detectedLang = '';
+      const langPath = path.join(audioDir, `${baseName}.lang.txt`);
+      if (existsSync(langPath)) {
+        try {
+          detectedLang = readFileSync(langPath, 'utf-8').trim();
         } catch { /* ignore */ }
       }
 
@@ -190,7 +233,9 @@ router.post('/build-dataset', authMiddleware, async (req: AuthenticatedRequest, 
         keyscale: '',
         timesignature: '',
         duration,
-        language: isInstrumental ? 'instrumental' : 'unknown',
+        language: isInstrumental
+          ? 'instrumental'
+          : (detectedLang || 'unknown'),
         is_instrumental: isInstrumental,
         custom_tag: customTag,
         labeled: false,
@@ -604,6 +649,12 @@ router.get('/lora-checkpoints', authMiddleware, async (req: AuthenticatedRequest
 });
 
 // POST /api/training/load-dataset — Load an existing dataset JSON for preprocessing
+//
+// Reshapes the FastAPI envelope to the same flat shape build-dataset returns.
+// Frontend's handleLoadDataset reads `result.sample`, `result.sampleCount`,
+// `result.settings`, etc. directly — without this reshape it would crash
+// with "Cannot read properties of undefined (reading 'caption')" trying
+// to read `.caption` on the undefined `result.sample`.
 router.post('/load-dataset', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { datasetPath } = req.body;
@@ -617,12 +668,55 @@ router.post('/load-dataset', authMiddleware, async (req: AuthenticatedRequest, r
       return;
     }
 
-    const data = await aceStepFetch('/v1/dataset/load', {
+    const apiResp = await aceStepFetch('/v1/dataset/load', {
       method: 'POST',
       body: { dataset_path: datasetPath },
     });
 
-    res.json(data);
+    // FastAPI returns { data: { samples, num_samples, dataset_name, ... }, code, ... }
+    const data = apiResp?.data ?? apiResp;
+    const samples = Array.isArray(data?.samples) ? data.samples : [];
+    const first = samples[0] ?? null;
+
+    // Read dataset JSON metadata for settings (FastAPI doesn't expose them).
+    let metadata: Record<string, unknown> = {};
+    try {
+      const raw = await readFile(datasetPath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      metadata = parsed?.metadata ?? {};
+    } catch {
+      // ignore — settings will fall back to defaults
+    }
+
+    res.json({
+      status: data?.message || `Dataset loaded (${samples.length} samples)`,
+      dataframe: data?.dataframe || null,
+      sampleCount: typeof data?.num_samples === 'number' ? data.num_samples : samples.length,
+      sample: first ? {
+        index: first.index ?? 0,
+        audio: first.audio_path ?? null,
+        filename: first.filename ?? '',
+        caption: first.caption ?? '',
+        genre: first.genre ?? '',
+        promptOverride: first.prompt_override ?? null,
+        lyrics: first.lyrics ?? '',
+        bpm: first.bpm ?? null,
+        key: first.keyscale ?? '',
+        timeSignature: first.timesignature ?? '',
+        duration: first.duration ?? 0,
+        language: first.language ?? 'unknown',
+        instrumental: first.is_instrumental ?? false,
+        rawLyrics: first.raw_lyrics ?? '',
+      } : null,
+      settings: {
+        datasetName: (metadata.name as string) ?? data?.dataset_name ?? 'untitled',
+        customTag: (metadata.custom_tag as string) ?? '',
+        tagPosition: (metadata.tag_position as string) ?? 'prepend',
+        allInstrumental: (metadata.all_instrumental as boolean) ?? false,
+        genreRatio: (metadata.genre_ratio as number) ?? 0,
+      },
+      datasetPath,
+    });
   } catch (error) {
     console.error('[Training] Load dataset error:', error);
     const status = (error as any).status || 500;
@@ -755,21 +849,30 @@ router.post('/start', authMiddleware, async (req: AuthenticatedRequest, res: Res
       shift, seed, outputDir, resumeCheckpoint,
     } = req.body;
 
+    // CRITICAL: every key here must match the FastAPI StartTrainingRequest
+    // pydantic field names exactly. pydantic silently drops unknown fields and
+    // falls back to its defaults — that's how we ended up training at
+    // train_epochs=10 (default) when the UI was set to 3000, and at lora_rank=64
+    // when the UI requested 128, etc. Field reference:
+    // /app/ACE-Step-1.5/acestep/api/train_api_models.py:14 (StartTrainingRequest)
     const data = await aceStepFetch('/v1/training/start', {
       method: 'POST',
       body: {
         tensor_dir: tensorDir ?? './datasets/preprocessed_tensors',
-        rank: rank ?? 64,
-        alpha: alpha ?? 128,
-        dropout: dropout ?? 0.1,
+        lora_rank: rank ?? 64,
+        lora_alpha: alpha ?? 128,
+        lora_dropout: dropout ?? 0.1,
         learning_rate: learningRate ?? 0.0003,
-        epochs: epochs ?? 1000,
-        batch_size: batchSize ?? 1,
+        train_epochs: epochs ?? 1000,
+        train_batch_size: batchSize ?? 1,
         gradient_accumulation: gradientAccumulation ?? 1,
-        save_every: saveEvery ?? 200,
-        shift: shift ?? 3.0,
-        seed: seed ?? 42,
-        output_dir: outputDir ?? './lora_output',
+        save_every_n_epochs: saveEvery ?? 200,
+        training_shift: shift ?? 3.0,
+        training_seed: seed ?? 42,
+        lora_output_dir: outputDir ?? './lora_output',
+        // resume_checkpoint isn't part of StartTrainingRequest — pydantic will
+        // drop it silently. Left here as a marker; if checkpoint resume is
+        // needed it has to be wired through a different endpoint or model.
         resume_checkpoint: resumeCheckpoint ?? null,
       },
       timeoutMs: 300_000, // training start can take time
@@ -804,6 +907,93 @@ router.post('/stop', authMiddleware, async (_req: AuthenticatedRequest, res: Res
     console.error('[Training] Stop training error:', error);
     const status = (error as any).status || 500;
     res.status(status).json({ error: error instanceof Error ? error.message : 'Failed to stop training' });
+  }
+});
+
+// POST /api/training/cleanup-artifacts — Wipe intermediate training artifacts.
+//
+// After a successful run the trained adapter lives at `<outputDir>/final/adapter`.
+// Everything else (raw uploads, stems, checkpoints, logs, preprocessed tensors,
+// dataset JSON) is no longer needed. This endpoint deletes those, keeping the
+// final adapter intact, so the user can free up disk between training runs
+// without going to the shell.
+//
+// Body: { outputDir: string, datasetName: string }
+// Response: { status: string, removed: string[] }
+//
+// Paths are resolved relative to the ACE-Step base. To prevent path-escape
+// shenanigans, every resolved target must live under either ACE-Step base,
+// the datasets uploads dir, or the datasets dir.
+router.post('/cleanup-artifacts', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { outputDir, datasetName } = (req.body ?? {}) as {
+      outputDir?: string;
+      datasetName?: string;
+    };
+    if (!outputDir || !datasetName) {
+      return res.status(400).json({ error: 'outputDir and datasetName are required' });
+    }
+
+    const aceBase = getAceStepDir();
+    const datasetsDir = config.datasets.dir;
+    const uploadsDir = config.datasets.uploadsDir;
+
+    // Reject anything that resolves outside one of the allowed roots — keeps a
+    // crafted "../../etc" payload from rm-ing the host filesystem.
+    const allowedRoots = [aceBase, datasetsDir, uploadsDir].map(p => path.resolve(p));
+    const isUnderAllowedRoot = (target: string) => {
+      const abs = path.resolve(target);
+      return allowedRoots.some(root => abs === root || abs.startsWith(root + path.sep));
+    };
+
+    const resolveAce = (p: string) => (path.isAbsolute(p) ? p : path.resolve(aceBase, p));
+    const resolvedOutputDir = resolveAce(outputDir);
+
+    // Specific things to delete. Order doesn't matter — fs.rm with force:true
+    // is idempotent (no error if the path doesn't exist).
+    const targets: string[] = [
+      // Per-run artifacts under outputDir, but preserve `<outputDir>/final/`.
+      path.join(resolvedOutputDir, 'checkpoints'),
+      path.join(resolvedOutputDir, 'logs'),
+      path.join(resolvedOutputDir, 'wandb'),
+      path.join(resolvedOutputDir, 'tensorboard'),
+      path.join(resolvedOutputDir, 'final_lora'), // legacy export-step output
+      // Source dataset
+      path.join(uploadsDir, datasetName),
+      path.join(uploadsDir, `${datasetName}_stems`),
+      path.join(datasetsDir, `${datasetName}.json`),
+      path.join(datasetsDir, `${datasetName}_stems.json`),
+      // Shared preprocess output — gets regenerated by the preprocess step on
+      // the next run, so safe to drop here.
+      path.join(datasetsDir, 'preprocessed_tensors'),
+    ];
+
+    const removed: string[] = [];
+    const skipped: string[] = [];
+    for (const target of targets) {
+      if (!isUnderAllowedRoot(target)) {
+        skipped.push(`${target} (outside allowed roots)`);
+        continue;
+      }
+      if (!existsSync(target)) continue;
+      try {
+        await rm(target, { recursive: true, force: true });
+        removed.push(target);
+      } catch (err) {
+        skipped.push(`${target} (${err instanceof Error ? err.message : 'rm failed'})`);
+      }
+    }
+
+    res.json({
+      status: removed.length
+        ? `Cleaned up ${removed.length} item(s)${skipped.length ? `, ${skipped.length} skipped` : ''}`
+        : 'Nothing to clean up',
+      removed,
+      skipped,
+    });
+  } catch (error) {
+    console.error('[Training] Cleanup error:', error);
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Cleanup failed' });
   }
 });
 

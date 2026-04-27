@@ -82,6 +82,21 @@ def main() -> None:
         help="Path to the IndexTTS-2 model dir. Falls back to HF cache (auto-snapshot_download).",
     )
     parser.add_argument(
+        "--cfg-path",
+        default=os.environ.get("INDEXTTS2_CFG_PATH"),
+        help="Path to config.yaml. Defaults to <model-dir>/config.yaml.",
+    )
+    parser.add_argument(
+        "--use-cuda-kernel",
+        action="store_true",
+        help="Enable BigVGAN compiled CUDA kernels (faster, may need build deps).",
+    )
+    parser.add_argument(
+        "--use-deepspeed",
+        action="store_true",
+        help="Enable DeepSpeed acceleration (must have deepspeed extras installed).",
+    )
+    parser.add_argument(
         "--max-text-tokens-per-segment",
         type=int,
         default=120,
@@ -147,13 +162,31 @@ def main() -> None:
                 details=f"{type(e).__name__}: {e}",
             )
 
+    # Resolve cfg_path — default to <model-dir>/config.yaml.
+    cfg_path = args.cfg_path or os.path.join(model_dir, "config.yaml")
+    if not os.path.exists(cfg_path):
+        _fail(
+            f"Config file not found: {cfg_path}. "
+            "Make sure the IndexTTS-2 model has been downloaded.",
+            code="cfg_missing",
+        )
+
     try:
-        tts = IndexTTS2(model_dir=model_dir, device=args.device, fp16=bool(args.fp16))
+        # IndexTTS2 constructor signature (per README):
+        #   IndexTTS2(cfg_path, model_dir, use_fp16, use_cuda_kernel, use_deepspeed)
+        # Device is auto-detected from model placement; no explicit `device=` arg.
+        tts = IndexTTS2(
+            cfg_path=cfg_path,
+            model_dir=model_dir,
+            use_fp16=bool(args.fp16),
+            use_cuda_kernel=bool(args.use_cuda_kernel),
+            use_deepspeed=bool(args.use_deepspeed),
+        )
     except Exception as e:
         _fail(
             f"IndexTTS2 init failed: {e}",
             code="indextts_init_failed",
-            details=traceback.format_exc(limit=4),
+            details=traceback.format_exc(limit=8),
         )
 
     _emit({"phase": "generating", "chars": len(text)})
