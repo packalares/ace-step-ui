@@ -288,7 +288,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({
 
   // Model selection
   const [selectedModel, setSelectedModel] = useState<string>(() => {
-    return localStorage.getItem('ace-model') || 'acestep-v15-turbo-shift3';
+    return localStorage.getItem('ace-model') || 'acestep-v15-xl-turbo';
   });
   const previousModelRef = useRef<string>(selectedModel);
   

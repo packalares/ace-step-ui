@@ -426,7 +426,7 @@ export const TrainingPanel: React.FC = () => {
         await fetch('/api/generate/models/switch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: localStorage.getItem('ace-model') || 'acestep-v15-turbo', init_llm: true, lm_model_path: lmModel }),
+          body: JSON.stringify({ model: localStorage.getItem('ace-model') || 'acestep-v15-xl-turbo', init_llm: true, lm_model_path: lmModel }),
         }).catch(() => null);
 
         setModelInitStatus('Models ready');

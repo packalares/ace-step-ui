@@ -613,16 +613,13 @@ router.get('/models', async (_req, res: Response) => {
     const ACESTEP_DIR = process.env.ACESTEP_PATH || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../ACE-Step-1.5');
     const checkpointsDir = path.join(ACESTEP_DIR, 'checkpoints');
 
-    // All known DiT models from ACE-Step's model_downloader.py registry:
-    // - MAIN_MODEL_COMPONENTS includes "acestep-v15-turbo" (bundled with main download)
-    // - SUBMODEL_REGISTRY includes the rest (separate HuggingFace repos, auto-downloaded on init)
+    // ACE-Step 1.5 XL DiT models (submodels — separate HuggingFace repos,
+    // auto-downloaded on init). 4B DiT, ~9GB bf16 each; needs ≥12GB VRAM
+    // w/ offload, ≥20GB without.
     const ALL_DIT_MODELS = [
-      'acestep-v15-turbo',             // default, from main model repo
-      'acestep-v15-base',              // submodel
-      'acestep-v15-sft',               // submodel
-      'acestep-v15-turbo-shift1',      // submodel
-      'acestep-v15-turbo-shift3',      // submodel
-      'acestep-v15-turbo-continuous',   // submodel
+      'acestep-v15-xl-turbo',          // default — 8 steps, fastest/cleanest XL
+      'acestep-v15-xl-sft',            // 50 steps + CFG, best prompt adherence
+      'acestep-v15-xl-base',           // foundation model, all tasks + fine-tuning
     ];
 
     // Query ACE-Step /v1/model_inventory to get the currently loaded/active model

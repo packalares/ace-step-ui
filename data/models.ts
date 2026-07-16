@@ -1,12 +1,9 @@
 // Single source of truth for model catalogs
 
 export const DIT_MODELS: Record<string, { description: string; size: string }> = {
-  'acestep-v15-turbo': { description: 'Optimized for speed. Uses fewer inference steps (5-10).', size: '4.5 GB' },
-  'acestep-v15-base': { description: 'Standard DiT model. Needs more steps (20-50).', size: '4.5 GB' },
-  'acestep-v15-sft': { description: 'Supervised fine-tuned. Better prompt adherence.', size: '4.5 GB' },
-  'acestep-v15-turbo-shift1': { description: 'Turbo variant with shift=1.', size: '4.5 GB' },
-  'acestep-v15-turbo-shift3': { description: 'Turbo variant with shift=3. Warmer sound.', size: '4.5 GB' },
-  'acestep-v15-turbo-continuous': { description: 'Continuous flow turbo. Experimental.', size: '4.5 GB' },
+  'acestep-v15-xl-turbo': { description: 'XL (4B). Distilled for speed — 8 steps, no CFG. Highest clarity.', size: '9 GB' },
+  'acestep-v15-xl-sft': { description: 'XL (4B). Supervised fine-tuned. 50 steps + CFG, best prompt adherence.', size: '9 GB' },
+  'acestep-v15-xl-base': { description: 'XL (4B). Foundation model — all tasks + fine-tuning. 50 steps + CFG.', size: '9 GB' },
 };
 
 export const LM_MODELS: Record<string, { description: string; size: string }> = {
@@ -23,9 +20,8 @@ export const LYRICS_MODELS = [
 // Short display names for DiT models
 export function getModelDisplayName(modelId: string): string {
   const mapping: Record<string, string> = {
-    'acestep-v15-base': '1.5B', 'acestep-v15-sft': '1.5S',
-    'acestep-v15-turbo-shift1': '1.5TS1', 'acestep-v15-turbo-shift3': '1.5TS3',
-    'acestep-v15-turbo-continuous': '1.5TC', 'acestep-v15-turbo': '1.5T',
+    'acestep-v15-xl-turbo': 'XLT', 'acestep-v15-xl-sft': 'XLS',
+    'acestep-v15-xl-base': 'XLB',
   };
   return mapping[modelId] || modelId.replace('acestep-v15-', '');
 }

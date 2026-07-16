@@ -37,7 +37,7 @@ def get_handlers():
         _handler = AceStepHandler()
         _handler.initialize_service(
             project_root=ACESTEP_PATH,
-            config_path="acestep-v15-turbo",
+            config_path="acestep-v15-xl-turbo",
             device=device,
             offload_to_cpu=True,  # For 12GB GPU
         )

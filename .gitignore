@@ -94,3 +94,6 @@ wavacity-editor/
 
 # Script logs
 logs/
+
+# Next.js (stray build output)
+.next/
