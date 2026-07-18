@@ -106,6 +106,61 @@ function getAceStepDir(): string {
   return path.resolve(config.datasets.dir, '..');
 }
 
+// Trainer saves the finished LoRA to <output_dir>/final/adapter (see
+// python/acestep_patches/trainer.py) — that's the real PEFT directory
+// containing adapter_config.json. Older/partial runs may only have
+// <output_dir>/final. Prefer the adapter subdir when it exists.
+function resolveFinalCheckpointDir(finalDir: string): string {
+  const adapterDir = path.join(finalDir, 'adapter');
+  if (existsSync(path.join(adapterDir, 'adapter_config.json'))) {
+    return adapterDir;
+  }
+  return finalDir;
+}
+
+// Recursively collects LoRA checkpoints starting at `dir`. A "training root"
+// is any directory with a `checkpoints/` and/or `final/` child; personas are
+// nested under category subdirs (e.g. voice/voice_sinulescu/final/adapter),
+// so we walk into other subdirectories too, bounded by maxDepth.
+// List subdirectory names defensively. A dangling symlink, an unreadable
+// (EACCES) directory, or a racing delete must skip that entry rather than
+// throw and 500 the whole /lora-checkpoints route (which would break the
+// persona picker entirely). `withFileTypes` also avoids one stat() syscall
+// per entry, and Dirent.isDirectory() does NOT follow symlinks — so a symlink
+// pointing into a large tree can't amplify this walk.
+function safeSubdirNames(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name);
+  } catch {
+    return [];
+  }
+}
+
+function collectLoraCheckpoints(dir: string, maxDepth = 4): string[] {
+  const checkpoints: string[] = [];
+
+  const checkpointsDir = path.join(dir, 'checkpoints');
+  for (const name of safeSubdirNames(checkpointsDir)) {
+    checkpoints.push(path.join(checkpointsDir, name));
+  }
+
+  const finalDir = path.join(dir, 'final');
+  if (existsSync(finalDir)) {
+    checkpoints.push(resolveFinalCheckpointDir(finalDir));
+  }
+
+  if (maxDepth > 0) {
+    for (const name of safeSubdirNames(dir)) {
+      if (name === 'checkpoints' || name === 'final') continue;
+      checkpoints.push(...collectLoraCheckpoints(path.join(dir, name), maxDepth - 1));
+    }
+  }
+
+  return checkpoints;
+}
+
 // ================== ROUTES ==================
 
 // POST /api/training/upload-audio — Upload audio files for a dataset
@@ -622,24 +677,7 @@ router.get('/lora-checkpoints', authMiddleware, async (req: AuthenticatedRequest
       return;
     }
 
-    const entries = readdirSync(resolvedDir);
-    const checkpointsDir = path.join(resolvedDir, 'checkpoints');
-    const checkpoints: string[] = [];
-
-    if (existsSync(checkpointsDir)) {
-      const cpEntries = readdirSync(checkpointsDir);
-      cpEntries.forEach(e => {
-        if (statSync(path.join(checkpointsDir, e)).isDirectory()) {
-          checkpoints.push(path.join(checkpointsDir, e));
-        }
-      });
-    }
-
-    // Also check for "final" directory
-    const finalDir = path.join(resolvedDir, 'final');
-    if (existsSync(finalDir)) {
-      checkpoints.push(finalDir);
-    }
+    const checkpoints = collectLoraCheckpoints(resolvedDir);
 
     res.json({ checkpoints, outputDir: resolvedDir });
   } catch (error) {

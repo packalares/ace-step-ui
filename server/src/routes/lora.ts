@@ -1,8 +1,55 @@
 import { Router, Response } from 'express';
+import path from 'path';
+import { existsSync } from 'fs';
+import { config } from '../config/index.js';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { loadLora, unloadLora, setLoraScale, toggleLora, getLoraStatus } from '../services/acestep.js';
 
 const router = Router();
+
+// `lora_path` arrives straight from the request body. Confine it to the
+// ACE-Step install tree (which holds lora_output/ and checkpoints/) before
+// touching the filesystem: without this the existsSync probes below double as
+// an existence oracle for arbitrary paths, and ACE-Step would happily be asked
+// to load an adapter from anywhere on disk.
+const ACESTEP_BASE = path.resolve(config.datasets.dir, '..');
+
+function confineToAceStepDir(loraPath: string): string {
+  const resolved = path.resolve(ACESTEP_BASE, loraPath);
+  const rel = path.relative(ACESTEP_BASE, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new PathOutsideBaseError();
+  }
+  return resolved;
+}
+
+class PathOutsideBaseError extends Error {
+  constructor() {
+    super('lora_path must resolve inside the ACE-Step directory');
+  }
+}
+
+// ACE-Step expects `lora_path` to be a PEFT LoRA directory containing
+// adapter_config.json directly. Callers sometimes pass the training root
+// or its `final` dir instead of the actual adapter dir (trainer.py saves
+// to <output_dir>/final/adapter — see python/acestep_patches/trainer.py).
+// Resolve defensively; fall back to the confined path if nothing matches.
+function resolveAdapterPath(loraPath: string): string {
+  const base = confineToAceStepDir(loraPath);
+  if (existsSync(path.join(base, 'adapter_config.json'))) {
+    return base;
+  }
+  const candidates = [
+    path.join(base, 'final', 'adapter'),
+    path.join(base, 'adapter'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, 'adapter_config.json'))) {
+      return candidate;
+    }
+  }
+  return base;
+}
 
 // POST /api/lora/load
 router.post('/load', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
@@ -12,8 +59,18 @@ router.post('/load', authMiddleware, async (req: AuthenticatedRequest, res: Resp
       res.status(400).json({ error: 'lora_path is required' });
       return;
     }
-    const message = await loadLora(lora_path, adapter_name);
-    res.json({ message, lora_path, loaded: true });
+    let resolvedPath: string;
+    try {
+      resolvedPath = resolveAdapterPath(lora_path);
+    } catch (err) {
+      if (err instanceof PathOutsideBaseError) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+    const message = await loadLora(resolvedPath, adapter_name);
+    res.json({ message, lora_path: resolvedPath, loaded: true });
   } catch (error) {
     console.error('[LoRA] Load error:', error);
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to load LoRA' });

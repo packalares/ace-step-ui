@@ -203,22 +203,33 @@ ENV ACESTEP_PATH=/app/ACE-Step-1.5 \
     ACE_STEP_UI_PORT=3000 \
     ACESTEP_NO_INIT=true \
     ACESTEP_LM_BACKEND=pt \
+    ACESTEP_OFFLOAD_TO_CPU=true \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=all
 
 EXPOSE 3000
 
-# Start script: ACE-Step FastAPI (background) + Express server (foreground)
+# Start script: ACE-Step FastAPI + Express server, both backgrounded and
+# supervised — if either dies, the script exits so Kubernetes restarts the pod.
+# (Previously Express ran via `exec` in the foreground: if only ACE-Step
+# crashed, the pod stayed "healthy" because Express kept running.)
 COPY <<'EOF' /app/start.sh
 #!/bin/bash
+mkdir -p /app/logs
+# Pre-create both logs so `tail -F` always has real files to follow. With a
+# glob that matches nothing, bash passes the literal pattern through and tail
+# exits immediately.
+touch /app/logs/acestep.log /app/logs/express.log
+
 echo "Starting ACE-Step FastAPI on port 8000..."
 cd /app/ACE-Step-1.5
-python3 -c "
+(python3 -c "
 from acestep.api_server import create_app
 import uvicorn
 app = create_app()
 uvicorn.run(app, host='0.0.0.0', port=8000)
-" &
+" > /app/logs/acestep.log 2>&1) &
+ACESTEP_PID=$!
 
 echo "Waiting for ACE-Step API..."
 for i in $(seq 1 30); do
@@ -227,8 +238,20 @@ for i in $(seq 1 30); do
 done
 
 echo "Starting Express server on port 3000..."
-cd /app/ui/server
-exec npx tsx src/index.ts
+(cd /app/ui/server && npx tsx src/index.ts > /app/logs/express.log 2>&1) &
+EXPRESS_PID=$!
+
+# Stream both logs to container stdout so `kubectl logs` shows them live.
+# Named explicitly rather than globbed, and deliberately NOT supervised below:
+# if the log streamer dies the services are still healthy, so it must not
+# trigger a pod restart.
+tail -F /app/logs/acestep.log /app/logs/express.log &
+
+# Exit as soon as EITHER service dies so Kubernetes restarts the pod. Only the
+# two service PIDs are waited on — passing PIDs to `wait -n` needs bash >= 5.1
+# (ubuntu 22.04 base ships 5.1), and keeps `tail` out of the supervision set.
+wait -n "$ACESTEP_PID" "$EXPRESS_PID"
+exit $?
 EOF
 RUN chmod +x /app/start.sh
 
